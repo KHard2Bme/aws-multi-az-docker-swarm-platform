@@ -1,0 +1,1 @@
+# aws-multi-az-docker-swarm-platform
