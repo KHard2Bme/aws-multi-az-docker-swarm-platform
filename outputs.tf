@@ -1,4 +1,3 @@
-```hcl
 ############################################################
 # outputs.tf
 # Engineering for Failure: Docker Swarm on AWS - Version 2
@@ -211,5 +210,4 @@ output "manager_failure_metric" {
   description = "Manager node failure metric filter"
   value       = aws_cloudwatch_log_metric_filter.manager_node_failure.name
 }
-```
 
