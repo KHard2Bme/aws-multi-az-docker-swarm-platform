@@ -125,32 +125,52 @@ output "security_group_id" {
 
 ############################
 # EC2 Instances
-#
-# These outputs remain temporarily
-# because the current Version 1-style
-# EC2 resources are still present.
 ############################
 
-output "instance_ids" {
-  description = "EC2 Instance IDs"
+output "manager_instance_ids" {
+  description = "EC2 Instance IDs for the Docker Swarm managers"
   value = {
-    for name, instance in aws_instance.nodes :
+    for name, instance in aws_instance.managers :
     name => instance.id
   }
 }
 
-output "public_ips" {
-  description = "Public IP addresses of the current EC2 instances"
+output "manager_private_ips" {
+  description = "Private IP addresses of the Docker Swarm managers"
   value = {
-    for name, instance in aws_instance.nodes :
+    for name, instance in aws_instance.managers :
+    name => instance.private_ip
+  }
+}
+
+output "manager_private_dns" {
+  description = "Private DNS names of the Docker Swarm managers"
+  value = {
+    for name, instance in aws_instance.managers :
+    name => instance.private_dns
+  }
+}
+
+output "worker_instance_ids" {
+  description = "EC2 Instance IDs for the current Docker Swarm workers"
+  value = {
+    for name, instance in aws_instance.workers :
+    name => instance.id
+  }
+}
+
+output "worker_public_ips" {
+  description = "Public IP addresses of the current Docker Swarm workers"
+  value = {
+    for name, instance in aws_instance.workers :
     name => instance.public_ip
   }
 }
 
-output "public_dns" {
-  description = "Public DNS names of the current EC2 instances"
+output "worker_public_dns" {
+  description = "Public DNS names of the current Docker Swarm workers"
   value = {
-    for name, instance in aws_instance.nodes :
+    for name, instance in aws_instance.workers :
     name => instance.public_dns
   }
 }

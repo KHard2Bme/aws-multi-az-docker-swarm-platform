@@ -462,6 +462,7 @@ resource "aws_instance" "managers" {
   subnet_id                   = each.value.subnet
   key_name                    = var.key_name
   vpc_security_group_ids      = [aws_security_group.docker_swarm.id]
+  iam_instance_profile        = aws_iam_instance_profile.cloudwatch_agent_profile.name
   associate_public_ip_address = false
 
   user_data = file("${path.module}/manager_bootstrap.sh")
@@ -506,6 +507,7 @@ resource "aws_instance" "workers" {
   subnet_id                   = each.value.subnet
   key_name                    = var.key_name
   vpc_security_group_ids      = [aws_security_group.docker_swarm.id]
+  iam_instance_profile        = aws_iam_instance_profile.cloudwatch_agent_profile.name
   associate_public_ip_address = true
 
   user_data = file("${path.module}/docker_install.sh")
