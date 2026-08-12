@@ -1,19 +1,34 @@
-############################################
+############################################################
 # iam.tf
-# IAM resources for Version 2
+# Engineering for Failure - Version 2
 #
-# Responsibilities:
-#   - CloudWatch Agent
-#   - CloudWatch dashboard/alarm/log permissions
-#   - AWS Systems Manager Session Manager
-#   - Docker Swarm Parameter Store bootstrap
-############################################
+# IAM Architecture
+#
+# MANAGER / CONTROL-PLANE
+#   - SSM Session Manager
+#   - Docker Swarm bootstrap
+#   - Scoped SSM Parameter Store access
+#   - CloudWatch Agent telemetry
+#
+# WORKER / APPLICATION RUNTIME
+#   - CloudWatch telemetry only
+#   - No Swarm token access
+#   - No Parameter Store administration
+#   - No CloudWatch dashboard/alarm administration
+#
+############################################################
 
-############################################
-# EC2 Assume Role Policy
-############################################
 
-data "aws_iam_policy_document" "ec2_assume_role" {
+############################################################
+# MANAGER / CONTROL-PLANE IAM
+############################################################
+
+############################
+# Manager Assume Role Policy
+############################
+
+data "aws_iam_policy_document" "manager_assume_role" {
+
   statement {
     effect = "Allow"
 
@@ -22,70 +37,95 @@ data "aws_iam_policy_document" "ec2_assume_role" {
       identifiers = ["ec2.amazonaws.com"]
     }
 
-    actions = ["sts:AssumeRole"]
+    actions = [
+      "sts:AssumeRole"
+    ]
   }
 }
 
-############################################
-# EC2 IAM Role
-############################################
 
-resource "aws_iam_role" "cloudwatch_agent_role" {
-  name               = "${var.project_name}-cloudwatch-agent-role"
-  assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
+############################
+# Manager IAM Role
+############################
+
+resource "aws_iam_role" "manager_control_plane_role" {
+
+  name = "${var.project_name}-manager-control-plane-role"
+
+  assume_role_policy = data.aws_iam_policy_document.manager_assume_role.json
 
   tags = {
-    Name    = "${var.project_name}-cloudwatch-agent-role"
+    Name    = "${var.project_name}-manager-control-plane-role"
     Project = var.project_name
+    Role    = "Manager-Control-Plane"
   }
 }
 
-############################################
-# CloudWatch Agent
+
+############################
+# Systems Manager
 #
-# Preserves Version 1 CloudWatch
-# Agent functionality.
-############################################
-
-resource "aws_iam_role_policy_attachment" "cloudwatch_agent_server_policy" {
-  role       = aws_iam_role.cloudwatch_agent_role.name
-  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
-}
-
-############################################
-# AWS Systems Manager
+# Allows private managers to:
 #
-# Allows private EC2 managers/workers
-# to register with Systems Manager and
-# use Session Manager instead of SSH.
-############################################
+#   - Register with SSM
+#   - Use Session Manager
+#   - Receive SSM commands
+#
+# This replaces SSH as the primary
+# administrative access mechanism.
+############################
 
-resource "aws_iam_role_policy_attachment" "ssm_managed_instance_core" {
-  role       = aws_iam_role.cloudwatch_agent_role.name
+resource "aws_iam_role_policy_attachment" "manager_ssm" {
+
+  role = aws_iam_role.manager_control_plane_role.name
+
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-############################################
+
+############################
+# CloudWatch Agent
+#
+# Managers publish infrastructure
+# telemetry to CloudWatch.
+############################
+
+resource "aws_iam_role_policy_attachment" "manager_cloudwatch_agent" {
+
+  role = aws_iam_role.manager_control_plane_role.name
+
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
+
+
+############################
 # Docker Swarm Parameter Store
 #
-# Used by manager_bootstrap.sh to:
+# Managers require access to:
 #
-#   - Determine the bootstrap manager
-#   - Store/retrieve manager private IP
-#   - Store/retrieve manager join token
-#   - Store/retrieve worker join token
+#   /engineering-for-failure/docker-swarm/*
 #
-# Join tokens are stored as SecureString.
-############################################
+# This is used by manager_bootstrap.sh
+# for:
+#
+#   - Bootstrap coordination
+#   - Manager private IP
+#   - Manager join token
+#   - Worker join token
+############################
 
-resource "aws_iam_role_policy" "docker_swarm_parameter_store" {
-  name = "${var.project_name}-docker-swarm-parameter-store"
-  role = aws_iam_role.cloudwatch_agent_role.id
+resource "aws_iam_role_policy" "manager_swarm_parameter_store" {
+
+  name = "${var.project_name}-manager-swarm-parameter-store"
+
+  role = aws_iam_role.manager_control_plane_role.id
 
   policy = jsonencode({
+
     Version = "2012-10-17"
 
     Statement = [
+
       {
         Sid    = "DockerSwarmParameterStore"
         Effect = "Allow"
@@ -100,30 +140,37 @@ resource "aws_iam_role_policy" "docker_swarm_parameter_store" {
           "arn:aws:ssm:${var.aws_region}:*:parameter/engineering-for-failure/docker-swarm/*"
         ]
       }
+
     ]
   })
 }
 
-############################################
-# KMS Decrypt Permission
-#
-# Required when retrieving Docker Swarm
-# SecureString parameters from SSM.
-#
-# The policy is restricted to KMS requests
-# made through the SSM service in this region.
-############################################
 
-resource "aws_iam_role_policy" "docker_swarm_parameter_store_kms" {
-  name = "${var.project_name}-docker-swarm-kms"
-  role = aws_iam_role.cloudwatch_agent_role.id
+############################
+# KMS Decrypt
+#
+# Required for retrieving the
+# SecureString Swarm join tokens.
+#
+# Access is restricted to requests
+# made through SSM in this region.
+############################
+
+resource "aws_iam_role_policy" "manager_swarm_kms" {
+
+  name = "${var.project_name}-manager-swarm-kms"
+
+  role = aws_iam_role.manager_control_plane_role.id
 
   policy = jsonencode({
+
     Version = "2012-10-17"
 
     Statement = [
+
       {
-        Sid    = "DockerSwarmSecureStringDecrypt"
+        Sid    = "DecryptSwarmSecureStrings"
+
         Effect = "Allow"
 
         Action = [
@@ -133,71 +180,117 @@ resource "aws_iam_role_policy" "docker_swarm_parameter_store_kms" {
         Resource = "*"
 
         Condition = {
+
           StringEquals = {
             "kms:ViaService" = "ssm.${var.aws_region}.amazonaws.com"
           }
+
         }
       }
+
     ]
   })
 }
 
-############################################
-# EC2 Instance Profile
-#
-# Managers and workers will receive this
-# profile so they can use:
-#
-#   - CloudWatch Agent
-#   - SSM Session Manager
-#   - SSM Parameter Store
-############################################
 
-resource "aws_iam_instance_profile" "cloudwatch_agent_profile" {
-  name = "${var.project_name}-cloudwatch-agent-profile"
-  role = aws_iam_role.cloudwatch_agent_role.name
+############################
+# Manager Instance Profile
+############################
+
+resource "aws_iam_instance_profile" "manager_control_plane_profile" {
+
+  name = "${var.project_name}-manager-control-plane-profile"
+
+  role = aws_iam_role.manager_control_plane_role.name
 
   tags = {
-    Name    = "${var.project_name}-cloudwatch-agent-profile"
+    Name    = "${var.project_name}-manager-control-plane-profile"
     Project = var.project_name
+    Role    = "Manager-Control-Plane"
   }
 }
 
-############################################
-# Additional CloudWatch Permissions
-#
-# Preserves the existing Version 1
-# dashboard, alarm, and log permissions.
-############################################
 
-resource "aws_iam_role_policy" "cloudwatch_dashboard_policy" {
-  name = "${var.project_name}-cloudwatch-dashboard-policy"
-  role = aws_iam_role.cloudwatch_agent_role.id
 
-  policy = jsonencode({
-    Version = "2012-10-17"
+############################################################
+# WORKER / APPLICATION RUNTIME IAM
+############################################################
 
-    Statement = [
-      {
-        Effect = "Allow"
+############################
+# Worker Assume Role Policy
+############################
 
-        Action = [
-          "cloudwatch:GetDashboard",
-          "cloudwatch:PutDashboard",
-          "cloudwatch:ListDashboards",
-          "cloudwatch:DeleteDashboards",
+data "aws_iam_policy_document" "worker_assume_role" {
 
-          "cloudwatch:DescribeAlarms",
-          "cloudwatch:PutMetricAlarm",
-          "cloudwatch:DeleteAlarms",
+  statement {
+    effect = "Allow"
 
-          "logs:DescribeLogGroups",
-          "logs:DescribeMetricFilters",
-          "logs:PutMetricFilter"
-        ]
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"]
+    }
 
-        Resource = "*"
-      }
+    actions = [
+      "sts:AssumeRole"
     ]
-  })
+  }
+}
+
+
+############################
+# Worker Runtime IAM Role
+############################
+
+resource "aws_iam_role" "worker_runtime_role" {
+
+  name = "${var.project_name}-worker-runtime-role"
+
+  assume_role_policy = data.aws_iam_policy_document.worker_assume_role.json
+
+  tags = {
+    Name    = "${var.project_name}-worker-runtime-role"
+    Project = var.project_name
+    Role    = "Worker-Application-Runtime"
+  }
+}
+
+
+############################
+# Worker CloudWatch Telemetry
+#
+# Allows the worker/application
+# node to publish telemetry.
+#
+# It does NOT provide:
+#
+#   - Parameter Store access
+#   - Swarm token access
+#   - Dashboard administration
+#   - Alarm administration
+#   - IAM administration
+############################
+
+resource "aws_iam_role_policy_attachment" "worker_cloudwatch_agent" {
+
+  role = aws_iam_role.worker_runtime_role.name
+
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
+
+
+############################
+# Worker Instance Profile
+############################
+
+resource "aws_iam_instance_profile" "worker_runtime_profile" {
+
+  name = "${var.project_name}-worker-runtime-profile"
+
+  role = aws_iam_role.worker_runtime_role.name
+
+  tags = {
+    Name    = "${var.project_name}-worker-runtime-profile"
+    Project = var.project_name
+    Role    = "Worker-Application-Runtime"
+  }
 }
