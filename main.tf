@@ -457,11 +457,11 @@ locals {
 resource "aws_instance" "managers" {
   for_each = local.managers
 
-  ami                         = data.aws_ami.amazon_linux.id
-  instance_type               = var.instance_type
-  subnet_id                   = each.value.subnet
-  key_name                    = var.key_name
-  vpc_security_group_ids      = [aws_security_group.docker_swarm.id]
+  ami                    = data.aws_ami.amazon_linux.id
+  instance_type          = var.instance_type
+  subnet_id              = each.value.subnet
+  key_name               = var.key_name
+  vpc_security_group_ids = [aws_security_group.docker_swarm.id]
 
   iam_instance_profile = aws_iam_instance_profile.manager_control_plane_profile.name
 
@@ -509,7 +509,7 @@ resource "aws_instance" "workers" {
   subnet_id                   = each.value.subnet
   key_name                    = var.key_name
   vpc_security_group_ids      = [aws_security_group.docker_swarm.id]
-  iam_instance_profile        = aws_iam_instance_profile.cloudwatch_agent_profile.name
+  iam_instance_profile        = aws_iam_instance_profile.worker_runtime_profile.name
   associate_public_ip_address = true
 
   user_data = file("${path.module}/docker_install.sh")

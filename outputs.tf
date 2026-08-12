@@ -202,14 +202,19 @@ output "cloudwatch_log_group_arn" {
 # CloudWatch IAM
 ############################
 
-output "cloudwatch_iam_role_name" {
-  description = "IAM Role used by the CloudWatch Agent"
-  value       = aws_iam_role.cloudwatch_agent_role.name
+output "manager_control_plane_role_name" {
+  description = "IAM role used by Docker Swarm manager/control-plane nodes"
+  value       = aws_iam_role.manager_control_plane_role.name
 }
 
-output "cloudwatch_instance_profile_name" {
-  description = "IAM Instance Profile for EC2"
-  value       = aws_iam_instance_profile.cloudwatch_agent_profile.name
+output "manager_control_plane_profile_name" {
+  description = "IAM instance profile used by Docker Swarm manager/control-plane nodes"
+  value       = aws_iam_instance_profile.manager_control_plane_profile.name
+}
+
+output "worker_runtime_profile_name" {
+  description = "IAM instance profile used by Docker Swarm application worker nodes"
+  value       = aws_iam_instance_profile.worker_runtime_profile.name
 }
 
 ############################

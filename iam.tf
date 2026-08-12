@@ -127,11 +127,21 @@ resource "aws_iam_role_policy" "manager_swarm_parameter_store" {
     Statement = [
 
       {
+        Sid    = "DescribeParameters"
+        Effect = "Allow"
+
+        Action = [
+          "ssm:DescribeParameters"
+        ]
+
+        Resource = "*"
+      },
+
+      {
         Sid    = "DockerSwarmParameterStore"
         Effect = "Allow"
 
         Action = [
-          "ssm:DescribeParameters",
           "ssm:GetParameter",
           "ssm:PutParameter"
         ]
@@ -169,7 +179,7 @@ resource "aws_iam_role_policy" "manager_swarm_kms" {
     Statement = [
 
       {
-        Sid    = "DecryptSwarmSecureStrings"
+        Sid = "DecryptSwarmSecureStrings"
 
         Effect = "Allow"
 

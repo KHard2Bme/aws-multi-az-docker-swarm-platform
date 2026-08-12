@@ -239,7 +239,7 @@ if [ "${IS_BOOTSTRAP_MANAGER}" = "true" ]; then
 
     log "Checking whether Docker Swarm is already initialized..."
 
-    if docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null | grep -q "active"; then
+    if docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null | grep -q "^active$"; then
 
         log "Docker Swarm is already active on this manager."
 
@@ -355,7 +355,7 @@ else
 
     log "Joining existing Swarm as a manager..."
 
-    if docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null | grep -q "active"; then
+    if docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null | grep -q "^active$"; then
 
         log "This node is already part of a Docker Swarm."
 
