@@ -22,7 +22,7 @@ data "aws_ami" "amazon_linux" {
 }
 
 ############################
-# Networking
+# VPC
 ############################
 
 resource "aws_vpc" "main" {
@@ -52,8 +52,8 @@ resource "aws_internet_gateway" "igw" {
 ############################
 # Public Subnets
 #
-# These subnets will eventually host
-# the internet-facing Application Load
+# These will eventually host the
+# internet-facing Application Load
 # Balancer.
 ############################
 
@@ -102,9 +102,8 @@ resource "aws_subnet" "public_c" {
 ############################
 # Private Subnets
 #
-# These will eventually contain
-# the Docker Swarm managers and
-# workers.
+# Docker Swarm managers and
+# workers will use these subnets.
 ############################
 
 resource "aws_subnet" "private_a" {
@@ -207,9 +206,6 @@ resource "aws_eip" "nat" {
 #
 # Cost-optimized Version 2 design:
 # one NAT Gateway in Public Subnet A.
-#
-# Production expansion:
-# one NAT Gateway per AZ.
 ############################
 
 resource "aws_nat_gateway" "main" {
@@ -271,44 +267,78 @@ resource "aws_route_table_association" "private_c" {
 }
 
 ############################
-# Security Group
+# ALB Security Group
 #
-# TEMPORARY VERSION 1 SECURITY
-# CONFIGURATION
+# The ALB will be introduced in
+# the next networking step.
 #
-# This will be replaced in the next
-# networking/security step with
-# separate ALB and Swarm security
-# groups and SSH removal.
+# It is created now so the
+# security architecture is ready.
 ############################
 
-resource "aws_security_group" "docker_swarm" {
-  name        = "docker-swarm-sg"
-  description = "Docker Swarm Security Group"
+resource "aws_security_group" "alb" {
+  name        = "docker-swarm-alb-sg"
+  description = "Security group for the internet-facing Application Load Balancer"
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
+    description = "HTTP from the Internet"
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  egress {
+    description = "Allow outbound traffic"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name    = "docker-swarm-alb-sg"
+    Project = var.project_name
+  }
+}
+
+############################
+# Docker Swarm Security Group
+#
+# Managers and workers communicate
+# using the Docker Swarm ports.
+#
+# SSH is intentionally removed.
+#
+# HTTP remains available temporarily
+# because the existing workers have
+# not yet been moved behind the ALB.
+############################
+
+resource "aws_security_group" "docker_swarm" {
+  name        = "docker-swarm-sg"
+  description = "Docker Swarm node security group"
+  vpc_id      = aws_vpc.main.id
+
+  ############################
+  # Docker Swarm management
+  ############################
+
   ingress {
+    description = "Docker Swarm cluster management"
     from_port   = 2377
     to_port     = 2377
     protocol    = "tcp"
     cidr_blocks = [var.vpc_cidr]
   }
 
+  ############################
+  # Docker Swarm node communication
+  ############################
+
   ingress {
+    description = "Docker Swarm node communication TCP"
     from_port   = 7946
     to_port     = 7946
     protocol    = "tcp"
@@ -316,20 +346,50 @@ resource "aws_security_group" "docker_swarm" {
   }
 
   ingress {
+    description = "Docker Swarm node communication UDP"
     from_port   = 7946
     to_port     = 7946
     protocol    = "udp"
     cidr_blocks = [var.vpc_cidr]
   }
 
+  ############################
+  # Docker overlay network
+  ############################
+
   ingress {
+    description = "Docker Swarm overlay network"
     from_port   = 4789
     to_port     = 4789
     protocol    = "udp"
     cidr_blocks = [var.vpc_cidr]
   }
 
+  ############################
+  # Temporary HTTP access
+  #
+  # This remains temporarily because
+  # Worker1 and Worker2 are still
+  # public in this phase.
+  #
+  # It will be removed/restricted
+  # when the ALB becomes active.
+  ############################
+
+  ingress {
+    description = "Temporary HTTP access for existing application workers"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ############################
+  # Outbound
+  ############################
+
   egress {
+    description = "Allow outbound traffic"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -343,45 +403,69 @@ resource "aws_security_group" "docker_swarm" {
 }
 
 ############################
-# EC2 Instances
+# Docker Swarm Managers
 #
-# IMPORTANT:
-# These remain temporarily unchanged
-# during Phase 1A so that we can validate
-# the new network before moving the
-# Swarm nodes into private subnets.
-#
-# The next step will change this section
-# to:
+# Version 2:
 #
 # Manager 1 -> Private AZ-1
 # Manager 2 -> Private AZ-2
 # Manager 3 -> Private AZ-3
 #
-# Workers will eventually move to an
-# Auto Scaling Group in asg.tf.
+# No public IP addresses.
+#
+# IMPORTANT:
+# The manager bootstrap script must
+# be updated before applying this
+# change because these instances
+# will be replaced when their
+# subnet changes.
 ############################
 
 locals {
-  instances = {
-    Manager1 = { subnet = aws_subnet.public_a.id }
-    Manager2 = { subnet = aws_subnet.public_a.id }
-    Manager3 = { subnet = aws_subnet.public_b.id }
-    Worker1  = { subnet = aws_subnet.public_a.id }
-    Worker2  = { subnet = aws_subnet.public_b.id }
+  managers = {
+    Manager1 = {
+      subnet = aws_subnet.private_a.id
+      az     = var.availability_zone_a
+    }
+
+    Manager2 = {
+      subnet = aws_subnet.private_b.id
+      az     = var.availability_zone_b
+    }
+
+    Manager3 = {
+      subnet = aws_subnet.private_c.id
+      az     = var.availability_zone_c
+    }
+  }
+
+  workers = {
+    Worker1 = {
+      subnet = aws_subnet.public_a.id
+    }
+
+    Worker2 = {
+      subnet = aws_subnet.public_b.id
+    }
   }
 }
 
-resource "aws_instance" "nodes" {
-  for_each = local.instances
+############################
+# Manager EC2 Instances
+############################
+
+resource "aws_instance" "managers" {
+  for_each = local.managers
 
   ami                         = data.aws_ami.amazon_linux.id
   instance_type               = var.instance_type
   subnet_id                   = each.value.subnet
   key_name                    = var.key_name
   vpc_security_group_ids      = [aws_security_group.docker_swarm.id]
-  associate_public_ip_address = true
-  user_data                   = file("${path.module}/docker_install.sh")
+  associate_public_ip_address = false
+
+  user_data = file("${path.module}/manager_bootstrap.sh")
+
   user_data_replace_on_change = true
 
   root_block_device {
@@ -398,7 +482,51 @@ resource "aws_instance" "nodes" {
 
   tags = {
     Name    = each.key
-    Role    = startswith(each.key, "Manager") ? "Manager" : "Worker"
+    Role    = "Manager"
+    AZ      = each.value.az
+    Project = "Engineering-for-Failure-Docker-Swarm"
+  }
+}
+
+############################
+# Existing Workers
+#
+# These remain temporarily in
+# their existing public subnets.
+#
+# They will be replaced by a
+# 3-node Auto Scaling Group later.
+############################
+
+resource "aws_instance" "workers" {
+  for_each = local.workers
+
+  ami                         = data.aws_ami.amazon_linux.id
+  instance_type               = var.instance_type
+  subnet_id                   = each.value.subnet
+  key_name                    = var.key_name
+  vpc_security_group_ids      = [aws_security_group.docker_swarm.id]
+  associate_public_ip_address = true
+
+  user_data = file("${path.module}/docker_install.sh")
+
+  user_data_replace_on_change = true
+
+  root_block_device {
+    volume_size           = 20
+    volume_type           = "gp3"
+    delete_on_termination = true
+  }
+
+  lifecycle {
+    ignore_changes = [
+      ami
+    ]
+  }
+
+  tags = {
+    Name    = each.key
+    Role    = "Worker"
     Project = "Engineering-for-Failure-Docker-Swarm"
   }
 }
@@ -407,8 +535,9 @@ resource "aws_instance" "nodes" {
 # CloudWatch Dashboard
 #
 # Retained temporarily.
-# We will move this into dashboard.tf
-# during the monitoring/operations phase.
+# We will move this into
+# dashboard.tf during the
+# monitoring phase.
 ############################
 
 resource "aws_cloudwatch_dashboard" "dashboard" {
@@ -429,7 +558,10 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
           region = var.aws_region
 
           metrics = [
-            for i in aws_instance.nodes :
+            for i in merge(
+              aws_instance.managers,
+              aws_instance.workers
+            ) :
             ["AWS/EC2", "CPUUtilization", "InstanceId", i.id]
           ]
         }
@@ -447,7 +579,10 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
           region = var.aws_region
 
           metrics = [
-            for i in aws_instance.nodes :
+            for i in merge(
+              aws_instance.managers,
+              aws_instance.workers
+            ) :
             ["AWS/EC2", "StatusCheckFailed", "InstanceId", i.id]
           ]
         }
@@ -465,7 +600,10 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
           region = var.aws_region
 
           metrics = [
-            for i in aws_instance.nodes :
+            for i in merge(
+              aws_instance.managers,
+              aws_instance.workers
+            ) :
             ["AWS/EC2", "NetworkIn", "InstanceId", i.id]
           ]
         }
@@ -483,7 +621,10 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
           region = var.aws_region
 
           metrics = [
-            for i in aws_instance.nodes :
+            for i in merge(
+              aws_instance.managers,
+              aws_instance.workers
+            ) :
             ["AWS/EC2", "NetworkOut", "InstanceId", i.id]
           ]
         }
