@@ -287,6 +287,103 @@ resource "aws_iam_role_policy_attachment" "worker_cloudwatch_agent" {
   policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
 }
 
+############################
+# Worker Swarm Parameter Store Read Access
+#
+# Workers may retrieve ONLY:
+#
+#   - manager-ip
+#   - worker-join-token
+#
+# Workers must NOT retrieve:
+#
+#   - manager-join-token
+#
+# Workers also cannot:
+#
+#   - PutParameter
+#   - DeleteParameter
+#   - DescribeParameters
+#   - GetParametersByPath
+############################
+
+resource "aws_iam_role_policy" "worker_swarm_parameter_store" {
+
+  name = "${var.project_name}-worker-swarm-parameter-store"
+
+  role = aws_iam_role.worker_runtime_role.id
+
+  policy = jsonencode({
+
+    Version = "2012-10-17"
+
+    Statement = [
+
+      {
+        Sid    = "ReadWorkerBootstrapParameters"
+        Effect = "Allow"
+
+        Action = [
+          "ssm:GetParameter"
+        ]
+
+        Resource = [
+          "arn:aws:ssm:${var.aws_region}:*:parameter/engineering-for-failure/docker-swarm/manager-ip",
+          "arn:aws:ssm:${var.aws_region}:*:parameter/engineering-for-failure/docker-swarm/worker-join-token"
+        ]
+      }
+
+    ]
+  })
+}
+
+
+############################
+# Worker Swarm Token KMS Access
+#
+# The worker join token is stored as
+# an SSM SecureString.
+#
+# This permits decryption through
+# Systems Manager only.
+############################
+
+resource "aws_iam_role_policy" "worker_swarm_kms" {
+
+  name = "${var.project_name}-worker-swarm-kms"
+
+  role = aws_iam_role.worker_runtime_role.id
+
+  policy = jsonencode({
+
+    Version = "2012-10-17"
+
+    Statement = [
+
+      {
+        Sid    = "DecryptWorkerSwarmToken"
+
+        Effect = "Allow"
+
+        Action = [
+          "kms:Decrypt"
+        ]
+
+        Resource = "*"
+
+        Condition = {
+
+          StringEquals = {
+            "kms:ViaService" = "ssm.${var.aws_region}.amazonaws.com"
+          }
+
+        }
+      }
+
+    ]
+  })
+}
+
 
 ############################
 # Worker Instance Profile
