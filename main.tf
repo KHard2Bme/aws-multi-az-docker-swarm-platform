@@ -469,8 +469,9 @@ resource "aws_instance" "managers" {
 
   user_data = file("${path.module}/manager_bootstrap.sh")
 
-  lifecycle {
+ lifecycle {
   ignore_changes = [
+    ami,
     user_data
   ]
 }
@@ -481,12 +482,7 @@ resource "aws_instance" "managers" {
     delete_on_termination = true
   }
 
-  lifecycle {
-    ignore_changes = [
-      ami
-    ]
-  }
-
+ 
   tags = {
     Name    = each.key
     Role    = "Manager"
