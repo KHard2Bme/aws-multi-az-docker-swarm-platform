@@ -469,12 +469,12 @@ resource "aws_instance" "managers" {
 
   user_data = file("${path.module}/manager_bootstrap.sh")
 
- lifecycle {
-  ignore_changes = [
-    ami,
-    user_data
-  ]
-}
+  lifecycle {
+    ignore_changes = [
+      ami,
+      user_data
+    ]
+  }
 
   root_block_device {
     volume_size           = 20
@@ -482,7 +482,7 @@ resource "aws_instance" "managers" {
     delete_on_termination = true
   }
 
- 
+
   tags = {
     Name    = each.key
     Role    = "Manager"
