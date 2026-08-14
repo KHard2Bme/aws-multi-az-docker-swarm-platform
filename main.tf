@@ -469,7 +469,11 @@ resource "aws_instance" "managers" {
 
   user_data = file("${path.module}/manager_bootstrap.sh")
 
-  user_data_replace_on_change = true
+  lifecycle {
+  ignore_changes = [
+    user_data
+  ]
+}
 
   root_block_device {
     volume_size           = 20

@@ -361,7 +361,7 @@ resource "aws_iam_role_policy" "worker_swarm_kms" {
     Statement = [
 
       {
-        Sid    = "DecryptWorkerSwarmToken"
+        Sid = "DecryptWorkerSwarmToken"
 
         Effect = "Allow"
 
