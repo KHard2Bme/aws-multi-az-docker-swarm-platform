@@ -152,27 +152,25 @@ output "manager_private_dns" {
 }
 
 output "worker_instance_ids" {
-  description = "EC2 Instance IDs for the current Docker Swarm workers"
+  description = "Worker Auto Scaling Group names"
+
   value = {
-    for name, instance in aws_instance.workers :
-    name => instance.id
+    AZ_A = aws_autoscaling_group.workers_a.name
+    AZ_B = aws_autoscaling_group.workers_b.name
+    AZ_C = aws_autoscaling_group.workers_c.name
   }
 }
 
 output "worker_public_ips" {
-  description = "Public IP addresses of the current Docker Swarm workers"
-  value = {
-    for name, instance in aws_instance.workers :
-    name => instance.public_ip
-  }
+  description = "Worker public IP addresses - workers are deployed in private subnets"
+
+  value = "Workers are private and do not have public IP addresses."
 }
 
 output "worker_public_dns" {
-  description = "Public DNS names of the current Docker Swarm workers"
-  value = {
-    for name, instance in aws_instance.workers :
-    name => instance.public_dns
-  }
+  description = "Worker public DNS names - workers are deployed in private subnets"
+
+  value = "Workers are private and do not have public DNS names."
 }
 
 ############################

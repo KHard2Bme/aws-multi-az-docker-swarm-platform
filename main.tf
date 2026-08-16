@@ -731,10 +731,7 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
           region = var.aws_region
 
           metrics = [
-            for i in merge(
-              aws_instance.managers,
-              aws_instance.workers
-            ) :
+            for i in aws_instance.managers :
             ["AWS/EC2", "CPUUtilization", "InstanceId", i.id]
           ]
         }
@@ -752,10 +749,7 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
           region = var.aws_region
 
           metrics = [
-            for i in merge(
-              aws_instance.managers,
-              aws_instance.workers
-            ) :
+            for i in aws_instance.managers :
             ["AWS/EC2", "StatusCheckFailed", "InstanceId", i.id]
           ]
         }
@@ -773,10 +767,7 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
           region = var.aws_region
 
           metrics = [
-            for i in merge(
-              aws_instance.managers,
-              aws_instance.workers
-            ) :
+            for i in aws_instance.managers :
             ["AWS/EC2", "NetworkIn", "InstanceId", i.id]
           ]
         }
@@ -794,10 +785,7 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
           region = var.aws_region
 
           metrics = [
-            for i in merge(
-              aws_instance.managers,
-              aws_instance.workers
-            ) :
+            for i in aws_instance.managers :
             ["AWS/EC2", "NetworkOut", "InstanceId", i.id]
           ]
         }
