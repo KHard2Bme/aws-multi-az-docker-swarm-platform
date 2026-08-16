@@ -438,16 +438,6 @@ locals {
       az     = var.availability_zone_c
     }
   }
-
-  workers = {
-    Worker1 = {
-      subnet = aws_subnet.public_a.id
-    }
-
-    Worker2 = {
-      subnet = aws_subnet.public_b.id
-    }
-  }
 }
 
 ############################
@@ -492,46 +482,225 @@ resource "aws_instance" "managers" {
 }
 
 ############################
-# Existing Workers
+# Worker Launch Template
 #
-# These remain temporarily in
-# their existing public subnets.
+# Application/runtime nodes.
 #
-# They will be replaced by a
-# 3-node Auto Scaling Group later.
+# Workers:
+# - use the worker runtime IAM profile
+# - run in private subnets
+# - install Docker
+# - install SSM Agent
+# - retrieve the Swarm worker token
+# - join the Swarm as workers
 ############################
 
-resource "aws_instance" "workers" {
-  for_each = local.workers
+resource "aws_launch_template" "workers" {
 
-  ami                         = data.aws_ami.amazon_linux.id
-  instance_type               = var.instance_type
-  subnet_id                   = each.value.subnet
-  key_name                    = var.key_name
-  vpc_security_group_ids      = [aws_security_group.docker_swarm.id]
-  iam_instance_profile        = aws_iam_instance_profile.worker_runtime_profile.name
-  associate_public_ip_address = true
+  name_prefix = "${var.project_name}-worker-"
 
-  user_data = file("${path.module}/docker_install.sh")
+  image_id = data.aws_ami.amazon_linux.id
 
-  user_data_replace_on_change = true
+  instance_type = var.instance_type
 
-  root_block_device {
-    volume_size           = 20
-    volume_type           = "gp3"
-    delete_on_termination = true
+  iam_instance_profile {
+    name = aws_iam_instance_profile.worker_runtime_profile.name
   }
 
-  lifecycle {
-    ignore_changes = [
-      ami
-    ]
+  vpc_security_group_ids = [
+    aws_security_group.docker_swarm.id
+  ]
+
+  user_data = filebase64("${path.module}/worker_bootstrap.sh")
+
+  block_device_mappings {
+    device_name = "/dev/xvda"
+
+    ebs {
+      volume_size           = 20
+      volume_type           = "gp3"
+      delete_on_termination = true
+    }
   }
 
-  tags = {
-    Name    = each.key
-    Role    = "Worker"
-    Project = "Engineering-for-Failure-Docker-Swarm"
+  tag_specifications {
+    resource_type = "instance"
+
+    tags = {
+      Role    = "Worker"
+      Project = "Engineering-for-Failure-Docker-Swarm"
+      Managed = "Terraform-ASG"
+    }
+  }
+
+  tag_specifications {
+    resource_type = "volume"
+
+    tags = {
+      Role    = "Worker"
+      Project = "Engineering-for-Failure-Docker-Swarm"
+    }
+  }
+}
+
+############################
+# Worker ASG - AZ A
+############################
+
+resource "aws_autoscaling_group" "workers_a" {
+
+  name = "${var.project_name}-workers-a"
+
+  min_size         = 1
+  max_size         = 1
+  desired_capacity = 1
+
+  vpc_zone_identifier = [
+    aws_subnet.private_a.id
+  ]
+
+  launch_template {
+    id      = aws_launch_template.workers.id
+    version = "$Latest"
+  }
+
+  health_check_type         = "EC2"
+  health_check_grace_period = 300
+
+  depends_on = [
+    aws_iam_instance_profile.worker_runtime_profile
+  ]
+
+  tag {
+    key                 = "Name"
+    value               = "Worker-A"
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "Role"
+    value               = "Worker"
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "AZ"
+    value               = var.availability_zone_a
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "Project"
+    value               = "Engineering-for-Failure-Docker-Swarm"
+    propagate_at_launch = true
+  }
+}
+
+
+############################
+# Worker ASG - AZ B
+############################
+
+resource "aws_autoscaling_group" "workers_b" {
+
+  name = "${var.project_name}-workers-b"
+
+  min_size         = 1
+  max_size         = 1
+  desired_capacity = 1
+
+  vpc_zone_identifier = [
+    aws_subnet.private_b.id
+  ]
+
+  launch_template {
+    id      = aws_launch_template.workers.id
+    version = "$Latest"
+  }
+
+  health_check_type         = "EC2"
+  health_check_grace_period = 300
+
+  depends_on = [
+    aws_iam_instance_profile.worker_runtime_profile
+  ]
+
+  tag {
+    key                 = "Name"
+    value               = "Worker-B"
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "Role"
+    value               = "Worker"
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "AZ"
+    value               = var.availability_zone_b
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "Project"
+    value               = "Engineering-for-Failure-Docker-Swarm"
+    propagate_at_launch = true
+  }
+}
+
+
+############################
+# Worker ASG - AZ C
+############################
+
+resource "aws_autoscaling_group" "workers_c" {
+
+  name = "${var.project_name}-workers-c"
+
+  min_size         = 1
+  max_size         = 1
+  desired_capacity = 1
+
+  vpc_zone_identifier = [
+    aws_subnet.private_c.id
+  ]
+
+  launch_template {
+    id      = aws_launch_template.workers.id
+    version = "$Latest"
+  }
+
+  health_check_type         = "EC2"
+  health_check_grace_period = 300
+
+  depends_on = [
+    aws_iam_instance_profile.worker_runtime_profile
+  ]
+
+  tag {
+    key                 = "Name"
+    value               = "Worker-C"
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "Role"
+    value               = "Worker"
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "AZ"
+    value               = var.availability_zone_c
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "Project"
+    value               = "Engineering-for-Failure-Docker-Swarm"
+    propagate_at_launch = true
   }
 }
 
