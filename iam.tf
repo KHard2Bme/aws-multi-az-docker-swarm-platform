@@ -264,6 +264,23 @@ resource "aws_iam_role" "worker_runtime_role" {
   }
 }
 
+############################################
+# Worker Runtime - AWS Systems Manager
+#
+# Allows the worker EC2 instance to register
+# with AWS Systems Manager and use core SSM
+# functionality.
+#
+# This is runtime management access only.
+# It does NOT grant Docker Swarm manager
+# or control-plane permissions.
+############################################
+
+resource "aws_iam_role_policy_attachment" "worker_ssm_managed_instance_core" {
+  role       = aws_iam_role.worker_runtime_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
 
 ############################
 # Worker CloudWatch Telemetry
