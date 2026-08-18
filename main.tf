@@ -364,6 +364,7 @@ resource "aws_security_group" "docker_swarm" {
     protocol    = "udp"
     cidr_blocks = [var.vpc_cidr]
   }
+}
 
   ##################################################
   # Application Load Balancer
