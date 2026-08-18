@@ -365,23 +365,109 @@ resource "aws_security_group" "docker_swarm" {
     cidr_blocks = [var.vpc_cidr]
   }
 
+  ##################################################
+  # Application Load Balancer
+  #
+  # Internet-facing ALB deployed across
+  # the three public subnets.
+  ##################################################
+
+  resource "aws_lb" "application" {
+    name               = "${var.project_name}-alb"
+    internal           = false
+    load_balancer_type = "application"
+
+    security_groups = [
+      aws_security_group.alb.id
+    ]
+
+    subnets = [
+      aws_subnet.public_a.id,
+      aws_subnet.public_b.id,
+      aws_subnet.public_c.id
+    ]
+
+    enable_deletion_protection = false
+
+    tags = {
+      Name    = "${var.project_name}-alb"
+      Project = var.project_name
+      Role    = "Application Load Balancer"
+    }
+  }
+
+
+  ##################################################
+  # ALB Target Group
+  #
+  # The ALB forwards traffic to the
+  # Docker Swarm worker nodes on port 80.
+  #
+  # Docker Swarm's routing mesh allows
+  # traffic arriving at a worker to reach
+  # the Apache service.
+  ##################################################
+
+  resource "aws_lb_target_group" "apache" {
+    name        = "${var.project_name}-apache-tg"
+    port        = 80
+    protocol    = "HTTP"
+    target_type = "instance"
+
+    vpc_id = aws_vpc.main.id
+
+    health_check {
+      enabled             = true
+      healthy_threshold   = 2
+      unhealthy_threshold = 2
+      timeout             = 5
+      interval            = 30
+
+      protocol = "HTTP"
+      path     = "/"
+
+      matcher = "200"
+    }
+
+    tags = {
+      Name    = "${var.project_name}-apache-tg"
+      Project = var.project_name
+      Service = "Apache"
+    }
+  }
+
+
+  ##################################################
+  # ALB Listener
+  ##################################################
+
+  resource "aws_lb_listener" "http" {
+    load_balancer_arn = aws_lb.application.arn
+
+    port     = 80
+    protocol = "HTTP"
+
+    default_action {
+      type             = "forward"
+      target_group_arn = aws_lb_target_group.apache.arn
+    }
+  }
+
+
   ############################
-  # Temporary HTTP access
+  # HTTP from Application Load Balancer
   #
-  # This remains temporarily because
-  # Worker1 and Worker2 are still
-  # public in this phase.
-  #
-  # It will be removed/restricted
-  # when the ALB becomes active.
+  # Workers remain private.
+  # Application traffic is allowed
+  # only from the ALB security group.
   ############################
 
   ingress {
-    description = "Temporary HTTP access for existing application workers"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    description     = "HTTP from Application Load Balancer"
+    from_port       = 80
+    to_port         = 80
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
   }
 
   ############################
@@ -555,6 +641,10 @@ resource "aws_autoscaling_group" "workers_a" {
   max_size         = 1
   desired_capacity = 1
 
+  target_group_arns = [
+    aws_lb_target_group.apache.arn
+  ]
+
   vpc_zone_identifier = [
     aws_subnet.private_a.id
   ]
@@ -609,6 +699,10 @@ resource "aws_autoscaling_group" "workers_b" {
   max_size         = 1
   desired_capacity = 1
 
+  target_group_arns = [
+    aws_lb_target_group.apache.arn
+  ]
+
   vpc_zone_identifier = [
     aws_subnet.private_b.id
   ]
@@ -662,6 +756,10 @@ resource "aws_autoscaling_group" "workers_c" {
   min_size         = 1
   max_size         = 1
   desired_capacity = 1
+
+  target_group_arns = [
+    aws_lb_target_group.apache.arn
+  ]
 
   vpc_zone_identifier = [
     aws_subnet.private_c.id

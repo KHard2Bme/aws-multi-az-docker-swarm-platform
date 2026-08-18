@@ -234,3 +234,26 @@ output "manager_failure_metric" {
   value       = aws_cloudwatch_log_metric_filter.manager_node_failure.name
 }
 
+##################################################
+# Application Load Balancer
+##################################################
+
+output "alb_dns_name" {
+  description = "DNS name of the Application Load Balancer"
+  value       = aws_lb.application.dns_name
+}
+
+output "alb_url" {
+  description = "URL for the SkyBound Travel application"
+  value       = "http://${aws_lb.application.dns_name}"
+}
+
+output "alb_arn" {
+  description = "ARN of the Application Load Balancer"
+  value       = aws_lb.application.arn
+}
+
+output "apache_target_group_arn" {
+  description = "ARN of the Apache Application Load Balancer target group"
+  value       = aws_lb_target_group.apache.arn
+}
