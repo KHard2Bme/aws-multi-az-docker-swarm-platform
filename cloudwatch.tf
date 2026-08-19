@@ -1,14 +1,14 @@
 #############################################
-# CloudWatch
+# CloudWatch Monitoring
 # Engineering for Failure
 #############################################
 
 #############################################
-# CloudWatch Log Group
+# Docker CloudWatch Log Group
 #############################################
 
-resource "aws_cloudwatch_log_group" "docker" {
-  name              = "/engineering-for-failure/docker"
+resource "aws_cloudwatch_log_group" "docker_logs" {
+  name              = "/${var.project_name}/docker"
   retention_in_days = 14
 
   tags = {
@@ -20,9 +20,10 @@ resource "aws_cloudwatch_log_group" "docker" {
 #############################################
 # CloudWatch Agent Configuration
 #
-# Stored in SSM Parameter Store so that
-# managers and Auto Scaling workers can
-# retrieve the same configuration.
+# Stored in SSM Parameter Store.
+#
+# Managers and workers retrieve the same
+# configuration during bootstrap.
 #############################################
 
 resource "aws_ssm_parameter" "cloudwatch_agent_config" {
@@ -44,15 +45,14 @@ resource "aws_ssm_parameter" "cloudwatch_agent_config" {
 
 resource "aws_cloudwatch_log_metric_filter" "container_failure" {
   name           = "ContainerFailureFilter"
-  log_group_name = aws_cloudwatch_log_group.docker.name
+  log_group_name = aws_cloudwatch_log_group.docker_logs.name
 
   pattern = "\"ContainerFailure\""
 
   metric_transformation {
-    name      = "ContainerFailure"
-    namespace = "EngineeringForFailure"
-    value     = "1"
-
+    name          = "ContainerFailure"
+    namespace     = "EngineeringForFailure"
+    value         = "1"
     default_value = 0
   }
 }
@@ -63,15 +63,14 @@ resource "aws_cloudwatch_log_metric_filter" "container_failure" {
 
 resource "aws_cloudwatch_log_metric_filter" "worker_node_failure" {
   name           = "WorkerNodeFailureFilter"
-  log_group_name = aws_cloudwatch_log_group.docker.name
+  log_group_name = aws_cloudwatch_log_group.docker_logs.name
 
   pattern = "\"WorkerNodeFailure\""
 
   metric_transformation {
-    name      = "WorkerNodeFailure"
-    namespace = "EngineeringForFailure"
-    value     = "1"
-
+    name          = "WorkerNodeFailure"
+    namespace     = "EngineeringForFailure"
+    value         = "1"
     default_value = 0
   }
 }
@@ -82,15 +81,14 @@ resource "aws_cloudwatch_log_metric_filter" "worker_node_failure" {
 
 resource "aws_cloudwatch_log_metric_filter" "manager_node_failure" {
   name           = "ManagerNodeFailureFilter"
-  log_group_name = aws_cloudwatch_log_group.docker.name
+  log_group_name = aws_cloudwatch_log_group.docker_logs.name
 
   pattern = "\"ManagerNodeFailure\""
 
   metric_transformation {
-    name      = "ManagerNodeFailure"
-    namespace = "EngineeringForFailure"
-    value     = "1"
-
+    name          = "ManagerNodeFailure"
+    namespace     = "EngineeringForFailure"
+    value         = "1"
     default_value = 0
   }
 }
