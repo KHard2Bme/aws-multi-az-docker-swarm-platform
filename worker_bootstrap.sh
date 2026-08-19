@@ -3,7 +3,14 @@ set -u
 
 LOG_FILE="/var/log/worker-bootstrap.log"
 REGION="us-east-1"
+
 PARAMETER_PATH="/engineering-for-failure/docker-swarm"
+CLOUDWATCH_CONFIG_PARAMETER="/engineering-for-failure/cloudwatch/agent-config"
+
+CLOUDWATCH_CONFIG_FILE="/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json"
+
+DOCKER_EVENT_MONITOR="/usr/local/bin/docker_event_monitor.sh"
+DOCKER_EVENT_SERVICE="/etc/systemd/system/docker-event-monitor.service"
 
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
@@ -20,16 +27,28 @@ chmod 600 "$LOG_FILE"
 
 log "Docker Swarm Worker Bootstrap Starting"
 
-# Determine private IP using IMDSv2 with retries.
+#############################################
+# Determine Private IP Using IMDSv2
+#############################################
+
 PRIVATE_IP=""
 
 log "Determining worker private IP address..."
 
 for attempt in $(seq 1 12); do
-  IMDS_TOKEN=$(curl -sS --max-time 5     -X PUT     -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"     http://169.254.169.254/latest/api/token 2>/dev/null || true)
+
+  IMDS_TOKEN=$(curl -sS --max-time 5 \
+    -X PUT \
+    -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" \
+    http://169.254.169.254/latest/api/token 2>/dev/null || true)
 
   if [ -n "$IMDS_TOKEN" ]; then
-    PRIVATE_IP=$(curl -sS --max-time 5       -H "X-aws-ec2-metadata-token: $IMDS_TOKEN"       http://169.254.169.254/latest/meta-data/local-ipv4 2>/dev/null || true)
+
+    PRIVATE_IP=$(curl -sS --max-time 5 \
+      -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" \
+      http://169.254.169.254/latest/meta-data/local-ipv4 \
+      2>/dev/null || true)
+
   fi
 
   if [ -n "$PRIVATE_IP" ]; then
@@ -38,105 +57,350 @@ for attempt in $(seq 1 12); do
 
   log "Private IP not available yet. Attempt ${attempt}/12."
   sleep 5
+
 done
 
 [ -n "$PRIVATE_IP" ] || fail "Unable to determine private IP address."
+
 log "Worker private IP: $PRIVATE_IP"
 
-# Docker
+#############################################
+# Docker Installation
+#############################################
+
 if ! command -v docker >/dev/null 2>&1; then
+
   log "Installing Docker..."
+
   dnf install -y docker || fail "Docker installation failed."
+
 fi
 
 systemctl enable docker
-systemctl start docker || fail "Unable to start Docker."
-systemctl is-active --quiet docker || fail "Docker service is not active."
+
+systemctl start docker || \
+  fail "Unable to start Docker."
+
+systemctl is-active --quiet docker || \
+  fail "Docker service is not active."
+
 log "Docker is running."
 
+#############################################
 # AWS Systems Manager Agent
-if ! systemctl list-unit-files | grep -q '^amazon-ssm-agent.service'; then
+#############################################
+
+if ! systemctl list-unit-files | \
+  grep -q '^amazon-ssm-agent.service'; then
+
   log "Installing AWS Systems Manager Agent..."
-  dnf install -y amazon-ssm-agent || fail "SSM Agent installation failed."
+
+  dnf install -y amazon-ssm-agent || \
+    fail "SSM Agent installation failed."
+
 fi
 
 systemctl enable amazon-ssm-agent
-systemctl start amazon-ssm-agent || fail "Unable to start SSM Agent."
-systemctl is-active --quiet amazon-ssm-agent || fail "SSM Agent is not active."
+
+systemctl start amazon-ssm-agent || \
+  fail "Unable to start SSM Agent."
+
+systemctl is-active --quiet amazon-ssm-agent || \
+  fail "SSM Agent is not active."
+
 log "SSM Agent is running."
 
-# AWS CLI
-command -v aws >/dev/null 2>&1 || fail "AWS CLI is not available."
+#############################################
+# AWS CLI Validation
+#############################################
+
+command -v aws >/dev/null 2>&1 || \
+  fail "AWS CLI is not available."
+
 log "AWS CLI is available."
 
-# Wait for Parameter Store access
+#############################################
+# Wait For SSM Parameter Store Access
+#############################################
+
 log "Waiting for SSM Parameter Store access..."
+
 SSM_READY=false
 
 for attempt in $(seq 1 30); do
-  if aws ssm get-parameter     --name "${PARAMETER_PATH}/manager-ip"     --region "$REGION" >/dev/null 2>&1; then
+
+  if aws ssm get-parameter \
+    --name "${PARAMETER_PATH}/manager-ip" \
+    --region "$REGION" \
+    >/dev/null 2>&1; then
+
     SSM_READY=true
+
     log "SSM Parameter Store is accessible."
+
     break
+
   fi
 
   log "SSM Parameter Store not ready. Attempt ${attempt}/30."
+
   sleep 10
+
 done
 
-[ "$SSM_READY" = true ] || fail "Unable to access required SSM Parameter Store parameters."
+[ "$SSM_READY" = true ] || \
+  fail "Unable to access required SSM Parameter Store parameters."
 
-# Check current Swarm state
-SWARM_STATE=$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null || true)
+#############################################
+# Install CloudWatch Agent
+#############################################
 
-if [ "$SWARM_STATE" = "active" ]; then
-  log "Docker Swarm is already active on this worker."
+if ! command -v amazon-cloudwatch-agent-ctl \
+  >/dev/null 2>&1; then
 
-  CONTROL_AVAILABLE=$(docker info     --format '{{.Swarm.ControlAvailable}}' 2>/dev/null || true)
+  log "Installing Amazon CloudWatch Agent..."
 
-  [ "$CONTROL_AVAILABLE" = "true" ] &&     fail "This node unexpectedly has Swarm manager/control-plane access."
-else
-  log "Docker Swarm is inactive. Preparing to join as a worker."
+  dnf install -y amazon-cloudwatch-agent || \
+    fail "CloudWatch Agent installation failed."
+
 fi
 
-# Retrieve manager private IP
-MANAGER_IP=$(aws ssm get-parameter   --name "${PARAMETER_PATH}/manager-ip"   --region "$REGION"   --query Parameter.Value   --output text 2>/dev/null || true)
+log "Amazon CloudWatch Agent is installed."
 
-[ -n "$MANAGER_IP" ] && [ "$MANAGER_IP" != "None" ] ||   fail "Unable to retrieve Swarm manager private IP."
+#############################################
+# Retrieve CloudWatch Agent Configuration
+#############################################
+
+log "Retrieving CloudWatch Agent configuration from SSM Parameter Store..."
+
+mkdir -p "$(dirname "$CLOUDWATCH_CONFIG_FILE")"
+
+CLOUDWATCH_CONFIG_READY=false
+
+for attempt in $(seq 1 30); do
+
+  if aws ssm get-parameter \
+    --name "$CLOUDWATCH_CONFIG_PARAMETER" \
+    --region "$REGION" \
+    --query 'Parameter.Value' \
+    --output text \
+    > "$CLOUDWATCH_CONFIG_FILE" 2>/dev/null; then
+
+    if [ -s "$CLOUDWATCH_CONFIG_FILE" ]; then
+
+      CLOUDWATCH_CONFIG_READY=true
+
+      log "CloudWatch Agent configuration retrieved successfully."
+
+      break
+
+    fi
+
+  fi
+
+  log "CloudWatch configuration not available yet. Attempt ${attempt}/30."
+
+  sleep 10
+
+done
+
+[ "$CLOUDWATCH_CONFIG_READY" = true ] || \
+  fail "Unable to retrieve CloudWatch Agent configuration."
+
+#############################################
+# Create Docker Event Monitor Script
+#############################################
+
+log "Creating Docker event monitoring script..."
+
+cat > "$DOCKER_EVENT_MONITOR" <<'EOF'
+#!/bin/bash
+
+LOG_FILE="/var/log/docker-events.log"
+
+touch "$LOG_FILE"
+
+chmod 644 "$LOG_FILE"
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] DockerEventMonitorStarted" \
+  >> "$LOG_FILE"
+
+docker events \
+  --filter 'event=die' \
+  --filter 'event=stop' \
+  --format '{{json .}}' |
+while read -r event; do
+
+  timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+
+  echo "[$timestamp] ContainerFailure $event" \
+    >> "$LOG_FILE"
+
+done
+EOF
+
+chmod 755 "$DOCKER_EVENT_MONITOR"
+
+log "Docker event monitoring script created."
+
+#############################################
+# Create Docker Event Monitor Service
+#############################################
+
+log "Creating Docker event monitor systemd service..."
+
+cat > "$DOCKER_EVENT_SERVICE" <<EOF
+[Unit]
+Description=Docker Event Monitoring Service
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+ExecStart=$DOCKER_EVENT_MONITOR
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+
+systemctl enable docker-event-monitor.service
+
+systemctl restart docker-event-monitor.service || \
+  fail "Unable to start Docker event monitoring service."
+
+systemctl is-active --quiet docker-event-monitor.service || \
+  fail "Docker event monitoring service is not active."
+
+log "Docker event monitoring service is running."
+
+#############################################
+# Start CloudWatch Agent
+#############################################
+
+log "Starting Amazon CloudWatch Agent..."
+
+amazon-cloudwatch-agent-ctl \
+  -a fetch-config \
+  -m ec2 \
+  -s \
+  -c "file:${CLOUDWATCH_CONFIG_FILE}" \
+  || fail "Unable to start CloudWatch Agent."
+
+systemctl is-active --quiet amazon-cloudwatch-agent || \
+  fail "CloudWatch Agent is not active."
+
+log "Amazon CloudWatch Agent is running."
+
+#############################################
+# Check Current Swarm State
+#############################################
+
+SWARM_STATE=$(docker info \
+  --format '{{.Swarm.LocalNodeState}}' \
+  2>/dev/null || true)
+
+if [ "$SWARM_STATE" = "active" ]; then
+
+  log "Docker Swarm is already active on this worker."
+
+  CONTROL_AVAILABLE=$(docker info \
+    --format '{{.Swarm.ControlAvailable}}' \
+    2>/dev/null || true)
+
+  [ "$CONTROL_AVAILABLE" = "true" ] && \
+    fail "This node unexpectedly has Swarm manager/control-plane access."
+
+else
+
+  log "Docker Swarm is inactive. Preparing to join as a worker."
+
+fi
+
+#############################################
+# Retrieve Manager Private IP
+#############################################
+
+MANAGER_IP=$(aws ssm get-parameter \
+  --name "${PARAMETER_PATH}/manager-ip" \
+  --region "$REGION" \
+  --query Parameter.Value \
+  --output text 2>/dev/null || true)
+
+[ -n "$MANAGER_IP" ] && \
+[ "$MANAGER_IP" != "None" ] || \
+  fail "Unable to retrieve Swarm manager private IP."
 
 log "Swarm manager IP retrieved: $MANAGER_IP"
 
-# Retrieve worker-only Swarm join token
-WORKER_JOIN_TOKEN=$(aws ssm get-parameter   --name "${PARAMETER_PATH}/worker-join-token"   --with-decryption   --region "$REGION"   --query Parameter.Value   --output text 2>/dev/null || true)
+#############################################
+# Retrieve Worker Join Token
+#############################################
 
-[ -n "$WORKER_JOIN_TOKEN" ] && [ "$WORKER_JOIN_TOKEN" != "None" ] ||   fail "Unable to retrieve Swarm worker join token."
+WORKER_JOIN_TOKEN=$(aws ssm get-parameter \
+  --name "${PARAMETER_PATH}/worker-join-token" \
+  --with-decryption \
+  --region "$REGION" \
+  --query Parameter.Value \
+  --output text 2>/dev/null || true)
+
+[ -n "$WORKER_JOIN_TOKEN" ] && \
+[ "$WORKER_JOIN_TOKEN" != "None" ] || \
+  fail "Unable to retrieve Swarm worker join token."
 
 log "Worker join token retrieved successfully."
 
-# Join existing Docker Swarm as worker
-SWARM_STATE=$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null || true)
+#############################################
+# Join Docker Swarm As Worker
+#############################################
+
+SWARM_STATE=$(docker info \
+  --format '{{.Swarm.LocalNodeState}}' \
+  2>/dev/null || true)
 
 if [ "$SWARM_STATE" = "active" ]; then
+
   log "Node is already part of a Docker Swarm."
+
 else
+
   log "Joining Docker Swarm as a WORKER..."
 
-  docker swarm join     --token "$WORKER_JOIN_TOKEN"     "${MANAGER_IP}:2377"     --advertise-addr "$PRIVATE_IP"     || fail "Docker Swarm worker join failed."
+  docker swarm join \
+    --token "$WORKER_JOIN_TOKEN" \
+    "${MANAGER_IP}:2377" \
+    --advertise-addr "$PRIVATE_IP" \
+    || fail "Docker Swarm worker join failed."
 
   log "Docker Swarm worker join completed successfully."
+
 fi
 
-# Final validation
-SWARM_STATE=$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null || true)
-[ "$SWARM_STATE" = "active" ] ||   fail "Worker join attempt completed, but Swarm state is not active."
+#############################################
+# Final Validation
+#############################################
 
-CONTROL_AVAILABLE=$(docker info   --format '{{.Swarm.ControlAvailable}}' 2>/dev/null || true)
+SWARM_STATE=$(docker info \
+  --format '{{.Swarm.LocalNodeState}}' \
+  2>/dev/null || true)
 
-[ "$CONTROL_AVAILABLE" = "true" ] &&   fail "Worker node has Swarm control-plane access. Expected worker only."
+[ "$SWARM_STATE" = "active" ] || \
+  fail "Worker join attempt completed, but Swarm state is not active."
+
+CONTROL_AVAILABLE=$(docker info \
+  --format '{{.Swarm.ControlAvailable}}' \
+  2>/dev/null || true)
+
+[ "$CONTROL_AVAILABLE" = "true" ] && \
+  fail "Worker node has Swarm control-plane access. Expected worker only."
 
 log "Verified: node is an active Swarm worker."
+log "CloudWatch monitoring is active."
 log "Worker remains available for application workloads."
 log "Worker node labeling will be performed from the Swarm manager."
-log "Docker Swarm Worker Bootstrap Complete"
+log "Docker Swarm Worker Bootstrap Complete."
 
 exit 0
