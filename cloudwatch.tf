@@ -21,9 +21,7 @@ resource "aws_cloudwatch_log_group" "docker_logs" {
 # CloudWatch Agent Configuration
 #
 # Stored in SSM Parameter Store.
-#
-# Managers and workers retrieve the same
-# configuration during bootstrap.
+# Retrieved by the Swarm node bootstrap scripts.
 #############################################
 
 resource "aws_ssm_parameter" "cloudwatch_agent_config" {
@@ -96,11 +94,12 @@ resource "aws_cloudwatch_log_metric_filter" "manager_node_failure" {
 #############################################
 # CloudWatch Dashboard
 #
-# Combines:
-# - EC2 infrastructure metrics
-# - CloudWatch Agent custom metrics
-# - Docker failure metrics
-# - ALB health and traffic metrics
+# Focused specifically on:
+#
+# 1. Manager health
+# 2. Worker activity
+# 3. Failure detection
+# 4. Application availability
 #############################################
 
 resource "aws_cloudwatch_dashboard" "dashboard" {
@@ -109,9 +108,9 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
   dashboard_body = jsonencode({
     widgets = [
 
-      #################################################
-      # EC2 Infrastructure Metrics
-      #################################################
+      #############################################
+      # 1. Manager CPU Utilization
+      #############################################
 
       {
         type   = "metric"
@@ -139,6 +138,10 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
         }
       },
 
+      #############################################
+      # 2. Manager Status Checks
+      #############################################
+
       {
         type   = "metric"
         x      = 12
@@ -165,67 +168,17 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
         }
       },
 
-      {
-        type   = "metric"
-        x      = 0
-        y      = 6
-        width  = 12
-        height = 6
-
-        properties = {
-          title  = "Manager Network In"
-          view   = "timeSeries"
-          region = var.aws_region
-          stat   = "Average"
-          period = 300
-
-          metrics = [
-            for i in aws_instance.managers :
-            [
-              "AWS/EC2",
-              "NetworkIn",
-              "InstanceId",
-              i.id
-            ]
-          ]
-        }
-      },
-
-      {
-        type   = "metric"
-        x      = 12
-        y      = 6
-        width  = 12
-        height = 6
-
-        properties = {
-          title  = "Manager Network Out"
-          view   = "timeSeries"
-          region = var.aws_region
-          stat   = "Average"
-          period = 300
-
-          metrics = [
-            for i in aws_instance.managers :
-            [
-              "AWS/EC2",
-              "NetworkOut",
-              "InstanceId",
-              i.id
-            ]
-          ]
-        }
-      },
-
-      #################################################
-      # Worker CloudWatch Agent Metrics
-      #################################################
+      #############################################
+      # 3. Worker CPU Usage
+      #
+      # CloudWatch Agent custom metrics
+      #############################################
 
       {
         type   = "metric"
         x      = 0
-        y      = 12
-        width  = 12
+        y      = 6
+        width  = 24
         height = 6
 
         properties = {
@@ -248,87 +201,14 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
         }
       },
 
+      #############################################
+      # 4. Container Failures
+      #############################################
+
       {
         type   = "metric"
-        x      = 12
+        x      = 0
         y      = 12
-        width  = 12
-        height = 6
-
-        properties = {
-          title  = "Worker CPU Idle"
-          view   = "timeSeries"
-          region = var.aws_region
-          stat   = "Average"
-          period = 60
-
-          metrics = [
-            [
-              "EngineeringForFailure",
-              "cpu_usage_idle"
-            ]
-          ]
-        }
-      },
-
-      {
-        type   = "metric"
-        x      = 0
-        y      = 18
-        width  = 12
-        height = 6
-
-        properties = {
-          title  = "Worker Memory Utilization"
-          view   = "timeSeries"
-          region = var.aws_region
-          stat   = "Average"
-          period = 60
-
-          metrics = [
-            [
-              "EngineeringForFailure",
-              "mem_used_percent"
-            ]
-          ]
-        }
-      },
-
-      {
-        type   = "metric"
-        x      = 12
-        y      = 18
-        width  = 12
-        height = 6
-
-        properties = {
-          title  = "Worker Network Traffic"
-          view   = "timeSeries"
-          region = var.aws_region
-          stat   = "Average"
-          period = 60
-
-          metrics = [
-            [
-              "EngineeringForFailure",
-              "bytes_sent"
-            ],
-            [
-              ".",
-              "bytes_recv"
-            ]
-          ]
-        }
-      },
-
-      #################################################
-      # Docker Failure Metrics
-      #################################################
-
-      {
-        type   = "metric"
-        x      = 0
-        y      = 24
         width  = 8
         height = 6
 
@@ -348,10 +228,14 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
         }
       },
 
+      #############################################
+      # 5. Worker Node Failures
+      #############################################
+
       {
         type   = "metric"
         x      = 8
-        y      = 24
+        y      = 12
         width  = 8
         height = 6
 
@@ -371,10 +255,14 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
         }
       },
 
+      #############################################
+      # 6. Manager Node Failures
+      #############################################
+
       {
         type   = "metric"
         x      = 16
-        y      = 24
+        y      = 12
         width  = 8
         height = 6
 
@@ -394,14 +282,14 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
         }
       },
 
-      #################################################
-      # Application Load Balancer Metrics
-      #################################################
+      #############################################
+      # 7. ALB Healthy Hosts
+      #############################################
 
       {
         type   = "metric"
         x      = 0
-        y      = 30
+        y      = 18
         width  = 12
         height = 6
 
@@ -425,10 +313,14 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
         }
       },
 
+      #############################################
+      # 8. ALB Unhealthy Hosts
+      #############################################
+
       {
         type   = "metric"
         x      = 12
-        y      = 30
+        y      = 18
         width  = 12
         height = 6
 
@@ -445,106 +337,6 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
               "UnHealthyHostCount",
               "TargetGroup",
               aws_lb_target_group.apache.arn_suffix,
-              "LoadBalancer",
-              aws_lb.application.arn_suffix
-            ]
-          ]
-        }
-      },
-
-      {
-        type   = "metric"
-        x      = 0
-        y      = 36
-        width  = 12
-        height = 6
-
-        properties = {
-          title  = "ALB Request Count"
-          view   = "timeSeries"
-          region = var.aws_region
-          stat   = "Sum"
-          period = 60
-
-          metrics = [
-            [
-              "AWS/ApplicationELB",
-              "RequestCount",
-              "LoadBalancer",
-              aws_lb.application.arn_suffix
-            ]
-          ]
-        }
-      },
-
-      {
-        type   = "metric"
-        x      = 12
-        y      = 36
-        width  = 12
-        height = 6
-
-        properties = {
-          title  = "ALB Target Response Time"
-          view   = "timeSeries"
-          region = var.aws_region
-          stat   = "Average"
-          period = 60
-
-          metrics = [
-            [
-              "AWS/ApplicationELB",
-              "TargetResponseTime",
-              "LoadBalancer",
-              aws_lb.application.arn_suffix
-            ]
-          ]
-        }
-      },
-
-      {
-        type   = "metric"
-        x      = 0
-        y      = 42
-        width  = 12
-        height = 6
-
-        properties = {
-          title  = "ALB HTTP 5XX Errors"
-          view   = "timeSeries"
-          region = var.aws_region
-          stat   = "Sum"
-          period = 60
-
-          metrics = [
-            [
-              "AWS/ApplicationELB",
-              "HTTPCode_ELB_5XX_Count",
-              "LoadBalancer",
-              aws_lb.application.arn_suffix
-            ]
-          ]
-        }
-      },
-
-      {
-        type   = "metric"
-        x      = 12
-        y      = 42
-        width  = 12
-        height = 6
-
-        properties = {
-          title  = "ALB Target 5XX Errors"
-          view   = "timeSeries"
-          region = var.aws_region
-          stat   = "Sum"
-          period = 60
-
-          metrics = [
-            [
-              "AWS/ApplicationELB",
-              "HTTPCode_Target_5XX_Count",
               "LoadBalancer",
               aws_lb.application.arn_suffix
             ]
