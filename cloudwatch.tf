@@ -91,6 +91,164 @@ resource "aws_cloudwatch_log_metric_filter" "manager_node_failure" {
   }
 }
 
+
+#############################################
+# SNS Topic
+#
+# Receives CloudWatch alarm notifications.
+#############################################
+
+resource "aws_sns_topic" "failure_alerts" {
+  name = "${var.project_name}-failure-alerts"
+
+  tags = {
+    Name    = "${var.project_name}-failure-alerts"
+    Project = var.project_name
+  }
+}
+
+#############################################
+# SNS Email Subscription
+#############################################
+
+resource "aws_sns_topic_subscription" "failure_alert_email" {
+  topic_arn = aws_sns_topic.failure_alerts.arn
+  protocol  = "email"
+  endpoint  = "harding_kevin@hotmail.com"
+}
+
+#############################################
+# Container Failure Alarm
+#############################################
+
+resource "aws_cloudwatch_metric_alarm" "container_failure" {
+  alarm_name        = "${var.project_name}-container-failure"
+  alarm_description = "Alert when a Docker container failure is detected."
+
+  namespace   = "EngineeringForFailure"
+  metric_name = "ContainerFailure"
+
+  statistic = "Sum"
+  period    = 60
+
+  evaluation_periods = 1
+  threshold          = 1
+
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [
+    aws_sns_topic.failure_alerts.arn
+  ]
+
+  dimensions = {}
+
+  tags = {
+    Name    = "${var.project_name}-container-failure-alarm"
+    Project = var.project_name
+  }
+}
+
+#############################################
+# Worker Node Failure Alarm
+#############################################
+
+resource "aws_cloudwatch_metric_alarm" "worker_node_failure" {
+  alarm_name        = "${var.project_name}-worker-node-failure"
+  alarm_description = "Alert when a Docker Swarm worker node failure is detected."
+
+  namespace   = "EngineeringForFailure"
+  metric_name = "WorkerNodeFailure"
+
+  statistic = "Sum"
+  period    = 60
+
+  evaluation_periods = 1
+  threshold          = 1
+
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [
+    aws_sns_topic.failure_alerts.arn
+  ]
+
+  dimensions = {}
+
+  tags = {
+    Name    = "${var.project_name}-worker-node-failure-alarm"
+    Project = var.project_name
+  }
+}
+
+#############################################
+# Manager Node Failure Alarm
+#############################################
+
+resource "aws_cloudwatch_metric_alarm" "manager_node_failure" {
+  alarm_name        = "${var.project_name}-manager-node-failure"
+  alarm_description = "Alert when a Docker Swarm manager node failure is detected."
+
+  namespace   = "EngineeringForFailure"
+  metric_name = "ManagerNodeFailure"
+
+  statistic = "Sum"
+  period    = 60
+
+  evaluation_periods = 1
+  threshold          = 1
+
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [
+    aws_sns_topic.failure_alerts.arn
+  ]
+
+  dimensions = {}
+
+  tags = {
+    Name    = "${var.project_name}-manager-node-failure-alarm"
+    Project = var.project_name
+  }
+}
+
+#############################################
+# ALB Unhealthy Hosts Alarm
+#############################################
+
+resource "aws_cloudwatch_metric_alarm" "alb_unhealthy_hosts" {
+  alarm_name        = "${var.project_name}-alb-unhealthy-hosts"
+  alarm_description = "Alert when one or more Apache targets become unhealthy."
+
+  namespace   = "AWS/ApplicationELB"
+  metric_name = "UnHealthyHostCount"
+
+  statistic = "Average"
+  period    = 60
+
+  evaluation_periods = 1
+  threshold          = 1
+
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    LoadBalancer = aws_lb.application.arn_suffix
+    TargetGroup  = aws_lb_target_group.apache.arn_suffix
+  }
+
+  alarm_actions = [
+    aws_sns_topic.failure_alerts.arn
+  ]
+
+  tags = {
+    Name    = "${var.project_name}-alb-unhealthy-hosts-alarm"
+    Project = var.project_name
+  }
+}
+
+
 #############################################
 # CloudWatch Dashboard
 #
