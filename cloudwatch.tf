@@ -419,7 +419,7 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
               "TargetGroup",
               aws_lb_target_group.apache.arn_suffix,
               "LoadBalancer",
-              aws_lb.engineering_for_failure.arn_suffix
+              aws_lb.application.arn_suffix
             ]
           ]
         }
@@ -446,7 +446,7 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
               "TargetGroup",
               aws_lb_target_group.apache.arn_suffix,
               "LoadBalancer",
-              aws_lb.engineering_for_failure.arn_suffix
+              aws_lb.application.arn_suffix
             ]
           ]
         }
@@ -471,7 +471,7 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
               "AWS/ApplicationELB",
               "RequestCount",
               "LoadBalancer",
-              aws_lb.engineering_for_failure.arn_suffix
+              aws_lb.application.arn_suffix
             ]
           ]
         }
@@ -496,7 +496,7 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
               "AWS/ApplicationELB",
               "TargetResponseTime",
               "LoadBalancer",
-              aws_lb.engineering_for_failure.arn_suffix
+              aws_lb.application.arn_suffix
             ]
           ]
         }
@@ -521,7 +521,7 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
               "AWS/ApplicationELB",
               "HTTPCode_ELB_5XX_Count",
               "LoadBalancer",
-              aws_lb.engineering_for_failure.arn_suffix
+              aws_lb.application.arn_suffix
             ]
           ]
         }
@@ -546,7 +546,7 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
               "AWS/ApplicationELB",
               "HTTPCode_Target_5XX_Count",
               "LoadBalancer",
-              aws_lb.engineering_for_failure.arn_suffix
+              aws_lb.application.arn_suffix
             ]
           ]
         }
