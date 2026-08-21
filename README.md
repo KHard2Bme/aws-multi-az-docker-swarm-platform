@@ -1,257 +1,370 @@
-# AWS Multi-AZ Docker Swarm Platform
+# AWS Multi-AZ Docker Swarm Platform — Engineering for Failure
 
-[![AWS](https://img.shields.io/badge/AWS-Cloud-orange?logo=amazonaws)](https://aws.amazon.com/)
-[![Terraform](https://img.shields.io/badge/IaC-Terraform-7B42BC?logo=terraform)](https://www.terraform.io/)
-[![Docker](https://img.shields.io/badge/Container-Docker-2496ED?logo=docker)](https://www.docker.com/)
-[![Amazon Linux 2023](https://img.shields.io/badge/OS-Amazon%20Linux%202023-FF9900?logo=amazonaws)](https://aws.amazon.com/linux/amazon-linux-2023/)
-[![CloudWatch](https://img.shields.io/badge/Monitoring-CloudWatch-FF4F8B?logo=amazonaws)](https://aws.amazon.com/cloudwatch/)
+![AWS](https://img.shields.io/badge/AWS-Cloud-orange)
+![Terraform](https://img.shields.io/badge/IaC-Terraform-purple)
+![Docker](https://img.shields.io/badge/Container-Docker-blue)
+![CloudWatch](https://img.shields.io/badge/Monitoring-CloudWatch-ff9900)
+![Amazon Linux](https://img.shields.io/badge/OS-Amazon%20Linux%202023-green)
+![Status](https://img.shields.io/badge/Project-Version%202-success)
 
-> A highly available, multi-AZ Docker Swarm platform on AWS designed to demonstrate infrastructure resilience, workload recovery, monitoring, alerting, and controlled failure testing.
+A hands-on AWS and Docker Swarm resilience project designed to demonstrate how a distributed application platform responds to **container failures, worker failures, manager failures, planned maintenance events, load balancer failures, and Auto Scaling recovery scenarios**.
 
-## Overview
+The project uses Terraform to provision a Multi-AZ AWS environment with a three-node Docker Swarm manager control plane, worker capacity distributed across three Availability Zones, an Application Load Balancer, CloudWatch monitoring, automated alarms, SNS notifications, and repeatable failure-testing procedures.
 
-This project deploys a Docker Swarm platform across three Availability Zones in AWS. The architecture separates the control plane from application workloads and uses three manager nodes and three worker nodes.
+---
 
-The Apache application is deployed as three independent Swarm services:
+## 📌 Project Overview
 
-- `apache-a` → pinned to the worker in `us-east-1a`
-- `apache-b` → pinned to the worker in `us-east-1b`
-- `apache-c` → pinned to the worker in `us-east-1c`
+The goal of this project is not simply to deploy containers.
 
-An Application Load Balancer distributes traffic across the application platform. CloudWatch collects custom host metrics and Docker event logs, while metric filters, alarms, and SNS notifications support failure detection.
+The environment was intentionally designed to answer a more important question:
 
-## Project Goals
+> **What happens when part of the platform fails?**
 
-- Build infrastructure across three AWS Availability Zones.
-- Create a resilient Docker Swarm control plane.
-- Separate manager responsibilities from application workloads.
-- Deploy application capacity across three worker nodes.
-- Use Terraform for repeatable infrastructure provisioning.
-- Collect CloudWatch metrics and Docker event logs.
-- Detect container, worker, manager, and ALB health failures.
-- Generate CloudWatch alarms and SNS notifications.
-- Perform controlled failure and recovery testing.
-- Document operational maintenance and recovery procedures.
+The project demonstrates:
 
-## Current Architecture
+- Docker Swarm service self-healing
+- Container replacement
+- Worker node workload redistribution
+- Manager quorum resilience
+- Multi-AZ worker placement
+- Application Load Balancer health monitoring
+- CloudWatch Agent custom infrastructure metrics
+- Docker event logging
+- CloudWatch metric filters
+- CloudWatch alarms and SNS notifications
+- Planned maintenance procedures
+- Worker recovery and rejoining
+- ALB unhealthy-target testing
+- Auto Scaling recovery testing
+- Evidence collection through CloudWatch, Docker commands, and browser validation
+
+---
+
+# 🎯 Project Goals
+
+The primary goals of Version 2 are to:
+
+1. Build a resilient Docker Swarm platform across multiple AWS Availability Zones.
+2. Separate the Swarm control plane from application workloads.
+3. Run application services across workers in different Availability Zones.
+4. Automatically recover from container and worker failures.
+5. Maintain manager quorum during manager failures.
+6. Monitor infrastructure and Docker events with Amazon CloudWatch.
+7. Generate alerts for important failure conditions.
+8. Demonstrate resilience during planned operational maintenance.
+9. Validate Application Load Balancer health behavior.
+10. Validate worker replacement and recovery through Auto Scaling.
+11. Document repeatable failure and recovery procedures.
+
+---
+
+# 🏗️ Architecture
 
 ```text
                               Internet
-                                 |
-                                 v
-                    +--------------------------+
-                    | Application Load Balancer |
-                    +--------------------------+
-                         /        |        \
-                        /         |         \
-                       v          v          v
-             +-----------+  +-----------+  +-----------+
-             | Worker A  |  | Worker B  |  | Worker C  |
-             | us-east-1a|  | us-east-1b|  | us-east-1c|
-             | apache-a  |  | apache-b  |  | apache-c  |
-             +-----------+  +-----------+  +-----------+
+                                  │
+                                  ▼
+                    ┌─────────────────────────┐
+                    │ Application Load Balancer│
+                    │        Port 80           │
+                    └────────────┬────────────┘
+                                 │
+                    ┌────────────▼────────────┐
+                    │     Target Group         │
+                    └───────┬────────┬─────────┘
+                            │        │
+             ┌──────────────┘        └──────────────┐
 
-                    Docker Swarm Control Plane
-              +-------------+-------------+-------------+
-              | Manager 1   | Manager 2   | Manager 3   |
-              | us-east-1a  | us-east-1b  | us-east-1c  |
-              | Leader      | Reachable   | Reachable   |
-              +-------------+-------------+-------------+
+      us-east-1a              us-east-1b              us-east-1c
+ ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
+ │ Apache Service A │    │ Apache Service B │    │ Apache Service C │
+ │ Worker A         │    │ Worker B         │    │ Worker C         │
+ │ role=worker      │    │ role=worker      │    │ role=worker      │
+ │ az=us-east-1a    │    │ az=us-east-1b    │    │ az=us-east-1c    │
+ └──────────────────┘    └──────────────────┘    └──────────────────┘
 
-                        Monitoring & Alerting
-              +-----------------------------------------+
-              | CloudWatch Dashboard                    |
-              | Docker Event Logs                       |
-              | Custom Metrics                          |
-              | Metric Filters                          |
-              | CloudWatch Alarms                       |
-              +-------------------+---------------------+
-                                  |
-                                  v
-                              Amazon SNS
-                                  |
-                                  v
-                             Email Alert
+                  Docker Swarm Manager Control Plane
+
+ ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
+ │ Manager 1        │    │ Manager 2        │    │ Manager 3        │
+ │ Leader           │    │ Reachable        │    │ Reachable        │
+ │ Availability:    │    │ Availability:    │    │ Availability:    │
+ │ Drain            │    │ Drain            │    │ Drain            │
+ └──────────────────┘    └──────────────────┘    └──────────────────┘
+
+                     Monitoring and Alerting
+
+ Workers / Managers
+          │
+          ├── CloudWatch Agent
+          │     ├── CPU
+          │     ├── Memory
+          │     └── Network
+          │
+          ├── Docker Event Monitor
+          │     └── /var/log/docker-events.log
+          │
+          ▼
+ ┌───────────────────────────────┐
+ │ Amazon CloudWatch             │
+ │                               │
+ │ • Custom Metrics              │
+ │ • Docker Logs                 │
+ │ • Metric Filters              │
+ │ • Dashboard                   │
+ │ • Alarms                      │
+ └───────────────┬───────────────┘
+                 │
+                 ▼
+           Amazon SNS
+                 │
+                 ▼
+            Email Alert
 ```
 
-## Architecture Components
+---
 
-### Infrastructure
+# 🧰 Technology Stack
 
-- Custom VPC: `10.0.0.0/16`
-- Public subnets across three Availability Zones
-- Private subnets across three Availability Zones
-- NAT Gateway for private instance outbound access
-- Security groups for ALB, Swarm, SSH/administration, and monitoring traffic
+| Technology | Purpose |
+|---|---|
+| AWS EC2 | Docker Swarm managers and workers |
+| AWS VPC | Network isolation |
+| Public Subnets | Application Load Balancer access |
+| Private Subnets | Docker Swarm worker infrastructure |
+| NAT Gateway | Outbound internet access for private workers |
+| Application Load Balancer | Application traffic distribution and health checks |
+| Auto Scaling | Worker capacity recovery |
+| Docker | Container runtime |
+| Docker Swarm | Container orchestration and self-healing |
+| Terraform | Infrastructure as Code |
+| AWS Systems Manager Parameter Store | Swarm bootstrap configuration and CloudWatch Agent configuration |
+| CloudWatch Agent | CPU, memory, and network metrics |
+| CloudWatch Logs | Docker event logging |
+| CloudWatch Metric Filters | Failure-event detection |
+| CloudWatch Dashboard | Infrastructure and failure visibility |
+| CloudWatch Alarms | Automated failure detection |
+| Amazon SNS | Email notifications |
+| IAM | Least-privilege instance permissions |
+| Amazon Linux 2023 | EC2 operating system |
+| Bash | Bootstrap and monitoring automation |
 
-### Docker Swarm
+---
 
-**Managers**
-- Manager1
-- Manager2
-- Manager3
-
-The managers provide Docker Swarm quorum and control-plane availability. They are configured with `Drain` availability to prevent normal application workloads from running on the control plane.
-
-**Workers**
-- Worker A — `us-east-1a`
-- Worker B — `us-east-1b`
-- Worker C — `us-east-1c`
-
-Workers are labeled for workload placement:
+# 📁 Repository Structure
 
 ```text
-role=worker
-workload=application
-az=us-east-1a | us-east-1b | us-east-1c
+aws-multi-az-docker-swarm-platform/
+│
+├── main.tf
+├── iam.tf
+├── cloudwatch.tf
+├── variables.tf
+├── outputs.tf
+├── terraform.tfvars
+│
+├── manager-bootstrap.sh
+├── worker-bootstrap.sh
+│
+├── docker-stack.yml
+│
+├── cloudwatch-agent-config.json
+│
+├── README.md
+│
+└── screenshots/
+    ├── architecture/
+    ├── baseline/
+    ├── container-failure/
+    ├── worker-failure/
+    ├── manager-failure/
+    ├── operational-maintenance/
+    ├── alb-testing/
+    └── asg-testing/
 ```
 
-## Application Deployment
+---
 
-The Apache application uses the image:
+# 🐳 Docker Swarm Design
+
+## Manager Nodes
+
+Three Docker Swarm managers provide the control plane.
+
+The managers are configured with:
 
 ```text
-kevd637/apache-website:v1
+Availability: Drain
 ```
 
-The application is deployed as three services, each constrained to a specific Availability Zone worker.
+This prevents application workloads from being scheduled on the managers and keeps them dedicated to cluster management.
 
-Expected service state:
+Typical state:
 
 ```text
-engineering-for-failure_apache-a   1/1
-engineering-for-failure_apache-b   1/1
-engineering-for-failure_apache-c   1/1
+Manager1 → Leader
+Manager2 → Reachable
+Manager3 → Reachable
 ```
 
-Verify:
+A three-manager design allows the cluster to tolerate the loss of one manager while maintaining quorum.
 
-```bash
-sudo docker service ls
+---
+
+## Worker Nodes
+
+Workers are distributed across three Availability Zones.
+
+| Worker | Availability Zone | Labels |
+|---|---|---|
+| Worker A | us-east-1a | role=worker, workload=application, az=us-east-1a |
+| Worker B | us-east-1b | role=worker, workload=application, az=us-east-1b |
+| Worker C | us-east-1c | role=worker, workload=application, az=us-east-1c |
+
+The application is deployed as three separate services to demonstrate AZ-aware placement:
+
+```text
+apache-a → Worker A / us-east-1a
+apache-b → Worker B / us-east-1b
+apache-c → Worker C / us-east-1c
 ```
 
-Inspect placement:
+This makes failure testing easier to observe and provides predictable workload placement.
 
-```bash
-sudo docker service ps engineering-for-failure_apache-a
-sudo docker service ps engineering-for-failure_apache-b
-sudo docker service ps engineering-for-failure_apache-c
-```
+---
 
-## CloudWatch Monitoring
+# 📊 CloudWatch Monitoring
 
-The Amazon CloudWatch Agent is installed on the worker nodes.
+## CloudWatch Agent
 
-### Custom Namespace
+The CloudWatch Agent collects custom infrastructure metrics in the:
 
 ```text
 EngineeringForFailure
 ```
 
-### Custom Metrics
+namespace.
 
-- `cpu_usage_idle`
-- `cpu_usage_user`
-- `cpu_usage_system`
-- `mem_used_percent`
-- `bytes_sent`
-- `bytes_recv`
+Metrics include:
 
-### Docker Event Logging
+```text
+cpu_usage_idle
+cpu_usage_user
+cpu_usage_system
+mem_used_percent
+bytes_sent
+bytes_recv
+```
 
-Docker events are collected in:
+Metrics are collected from the EC2 instances using the CloudWatch Agent.
+
+---
+
+## Docker Event Monitoring
+
+A Docker event monitoring service captures selected Docker lifecycle events.
+
+The monitored events include:
+
+```text
+die
+stop
+```
+
+Events are written to:
 
 ```text
 /var/log/docker-events.log
 ```
 
-CloudWatch Log Group:
+The CloudWatch Agent forwards the events to:
 
 ```text
 /engineering-for-failure/docker
 ```
 
-The Docker event monitor runs as:
+This provides a centralized record of container and Docker-related events.
+
+---
+
+# 🚨 CloudWatch Metric Filters
+
+Metric filters convert relevant log events into CloudWatch metrics.
+
+The project includes:
 
 ```text
-docker-event-monitor.service
+ContainerFailureFilter
+WorkerNodeFailureFilter
+ManagerNodeFailureFilter
 ```
 
-Verify:
+These metrics support dashboard visibility and CloudWatch alarms.
 
-```bash
-sudo systemctl status docker-event-monitor --no-pager
-sudo tail -f /var/log/docker-events.log
-```
+---
 
-### CloudWatch Agent
+# 🔔 CloudWatch Alarms and SNS
 
-Verify:
+The project includes four primary CloudWatch alarms:
 
-```bash
-sudo systemctl status amazon-cloudwatch-agent --no-pager
-sudo systemctl is-active amazon-cloudwatch-agent
-```
+1. Container Failure
+2. Worker Node Failure
+3. Manager Node Failure
+4. ALB Unhealthy Hosts
 
-The active generated configuration is located under:
+When an alarm enters the `ALARM` state, Amazon SNS sends an email notification to the configured subscriber.
 
-```text
-/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.d/
-```
+The SNS subscription must be confirmed before notifications are delivered.
+
+---
+
+# 📈 Focused CloudWatch Dashboard
+
+The Version 2 dashboard focuses on the signals most useful during failure testing.
+
+## Infrastructure
+
+- Manager CPU Utilization
+- Manager Status Checks
+
+## Worker Monitoring
+
+- Worker CPU Usage
 
 ## Failure Monitoring
 
-The focused CloudWatch dashboard contains eight widgets:
+- Container Failures
+- Worker Node Failures
+- Manager Node Failures
 
-### Infrastructure
+## Application Load Balancer
 
-1. Manager CPU Utilization
-2. Manager Status Checks
+- ALB Healthy Hosts
+- ALB Unhealthy Hosts
 
-### Worker Monitoring
+These eight widgets provide a focused view of the platform's health during resilience testing.
 
-3. Worker CPU Usage
+---
 
-### Failure Monitoring
+# ✅ Baseline Validation
 
-4. Container Failures
-5. Worker Node Failures
-6. Manager Node Failures
+Before failure testing, confirm that the environment is healthy.
 
-### Application Load Balancer
-
-7. ALB Healthy Hosts
-8. ALB Unhealthy Hosts
-
-## CloudWatch Alarms
-
-The project includes alarms for:
-
-- Container failures
-- Worker node failures
-- Manager node failures
-- ALB unhealthy hosts
-
-All alarms are configured to publish notifications through an SNS topic after the email subscription is confirmed.
-
-## Baseline Validation
-
-Before failure testing, verify the following.
-
-### 1. Docker Swarm Health
+## Docker Swarm
 
 ```bash
 sudo docker node ls
 ```
 
 Expected:
-- 3 managers are `Ready`
-- 3 workers are `Ready`
-- one manager is `Leader`
-- managers are `Drain`
-- workers are `Active`
 
-### 2. Application Services
+- Three managers are `Ready`.
+- Three workers are `Ready`.
+- Managers are in `Drain`.
+- Workers are `Active`.
+
+## Services
 
 ```bash
 sudo docker service ls
@@ -265,7 +378,7 @@ apache-b   1/1
 apache-c   1/1
 ```
 
-### 3. Application Placement
+## Service Placement
 
 ```bash
 sudo docker service ps engineering-for-failure_apache-a
@@ -273,11 +386,11 @@ sudo docker service ps engineering-for-failure_apache-b
 sudo docker service ps engineering-for-failure_apache-c
 ```
 
-### 4. ALB Target Health
+## ALB Health
 
-Verify all registered application targets are healthy.
+Confirm all targets are healthy in the AWS console.
 
-### 5. HTTP Validation
+## Application Test
 
 ```bash
 curl -I http://<ALB-DNS-NAME>
@@ -289,275 +402,738 @@ Expected:
 HTTP/1.1 200 OK
 ```
 
-### 6. CloudWatch Agent
+## CloudWatch
 
-```bash
-sudo systemctl is-active amazon-cloudwatch-agent
-```
+Confirm:
 
-Expected:
+- CloudWatch Agent is active.
+- Docker event monitor is active.
+- Custom metrics are appearing.
+- Docker events are appearing in CloudWatch Logs.
+- All alarms are in `OK` state before testing.
 
-```text
-active
-```
+---
 
-### 7. Docker Event Monitor
+# 🧪 Version 2 Complete Test Plan
 
-```bash
-sudo systemctl is-active docker-event-monitor
-```
+The following tests are divided into:
 
-Expected:
+1. Primary failure scenarios
+2. Operational maintenance scenarios
+3. Application Load Balancer testing
+4. Auto Scaling Group testing
 
-```text
-active
-```
+For each scenario, capture evidence before, during, and after recovery.
 
-### 8. CloudWatch Metrics and Logs
+---
 
-Verify:
-- custom metrics are appearing in `EngineeringForFailure`
-- Docker event entries are appearing in `/engineering-for-failure/docker`
-- all four CloudWatch alarms are in `OK` state
+# 🚨 Primary Failure Scenario 1 — Container Failure
 
-## Failure Testing Scenarios
+## Purpose
 
-> Perform controlled tests one scenario at a time and confirm recovery before moving to the next test.
+Validate Docker Swarm's ability to detect a failed container and automatically schedule a replacement.
 
-### Scenario 1: Container Failure
+## Failure Command
 
-Force a container/service task to stop and observe:
-
-- Docker event logging
-- Container failure metric
-- CloudWatch alarm
-- SNS notification
-- Swarm task recovery
-
-Example:
+Identify the container:
 
 ```bash
 sudo docker ps
+```
+
+Stop the application container:
+
+```bash
 sudo docker stop <CONTAINER_ID>
 ```
 
-Recovery verification:
+## Expected Result
+
+- Docker container stops.
+- Docker event is generated.
+- CloudWatch receives the event.
+- Container failure metric is generated.
+- CloudWatch alarm may enter `ALARM`.
+- Docker Swarm schedules a replacement.
+- Application remains available.
+
+## Recovery
+
+No manual recovery should be required.
+
+Validate:
 
 ```bash
 sudo docker service ps engineering-for-failure_apache-a
-sudo docker service ps engineering-for-failure_apache-b
-sudo docker service ps engineering-for-failure_apache-c
-```
-
-### Scenario 2: Worker Failure
-
-Simulate worker loss using a controlled method appropriate to the test plan, then observe:
-
-- worker node status
-- application task behavior
-- Docker events
-- Worker Node Failure metric
-- CloudWatch alarm
-- SNS notification
-- ALB target health
-
-Recovery validation:
-
-```bash
-sudo docker node ls
 sudo docker service ls
+sudo docker ps
 ```
 
-### Scenario 3: Manager Failure
+## Evidence
 
-Test manager resilience while preserving quorum.
+- `docker service ps`
+- `docker ps`
+- CloudWatch Dashboard
+- CloudWatch Alarm
+- Browser or `curl` validation
 
-Observe:
+---
 
-- leader election behavior
-- manager status
-- Manager Node Failure metric
-- CloudWatch alarm
-- SNS notification
+# 🚨 Primary Failure Scenario 2 — Worker Node Failure
 
-Important: never intentionally take down enough managers to lose Swarm quorum during a normal resilience test.
+**Expected temporary application impact may occur while workloads are being recovered.**
 
-### Scenario 4: ALB Unhealthy Target
+## Purpose
 
-Create a controlled application/target failure and observe:
+Validate workload redistribution when a worker becomes unavailable.
 
-- `UnHealthyHostCount`
-- ALB target health
-- CloudWatch alarm
-- SNS notification
-- recovery after the target becomes healthy again
+## Failure Command
 
-## Operational Maintenance Scenarios
-
-### Check Swarm Health
+On the selected worker:
 
 ```bash
-sudo docker node ls
-sudo docker service ls
+sudo systemctl stop docker
 ```
 
-### Check Service Task History
+## Expected Result
+
+- Worker becomes unavailable.
+- Docker Swarm detects the failure.
+- Worker failure monitoring is triggered.
+- Tasks are redistributed where placement constraints allow.
+- Application availability is validated through the ALB.
+
+## Recovery Command
+
+On the worker:
 
 ```bash
-sudo docker service ps <SERVICE_NAME>
-```
-
-### Check Worker Labels
-
-```bash
-sudo docker node inspect <NODE_NAME> \
-  --format '{{json .Spec.Labels}}'
-```
-
-### Check CloudWatch Agent
-
-```bash
-sudo systemctl status amazon-cloudwatch-agent --no-pager
-```
-
-### Restart CloudWatch Agent
-
-```bash
-sudo systemctl restart amazon-cloudwatch-agent
-```
-
-### Check Docker Event Monitor
-
-```bash
-sudo systemctl status docker-event-monitor --no-pager
-```
-
-### Restart Docker Event Monitor
-
-```bash
-sudo systemctl restart docker-event-monitor
-```
-
-### Review Docker Events
-
-```bash
-sudo tail -n 100 /var/log/docker-events.log
-```
-
-### Redeploy the Stack
-
-From Manager1:
-
-```bash
-sudo docker stack deploy -c docker-stack.yml engineering-for-failure
-```
-
-Verify:
-
-```bash
-sudo docker service ls
-sudo docker node ls
-```
-
-## Repository Structure
-
-```text
-aws-multi-az-docker-swarm-platform/
-│
-├── main.tf
-├── iam.tf
-├── cloudwatch.tf
-├── alarms.tf
-├── variables.tf
-├── outputs.tf
-├── providers.tf
-│
-├── docker-stack.yml
-│
-├── scripts/
-│   ├── manager-bootstrap.sh
-│   ├── worker-bootstrap.sh
-│   └── docker_event_monitor.sh
-│
-├── docs/
-│   ├── architecture/
-│   ├── failure-testing/
-│   └── screenshots/
-│
-└── README.md
-```
-
-> Adjust this tree to match the exact folders and filenames in the repository.
-
-## Terraform Deployment
-
-Initialize:
-
-```bash
-terraform init
+sudo systemctl start docker
 ```
 
 Validate:
 
 ```bash
-terraform validate
+sudo systemctl status docker --no-pager
 ```
 
-Review:
+From a manager:
+
+```bash
+sudo docker node ls
+sudo docker service ps engineering-for-failure_apache-a
+sudo docker service ps engineering-for-failure_apache-b
+sudo docker service ps engineering-for-failure_apache-c
+```
+
+## Evidence
+
+- `docker node ls`
+- `docker service ps`
+- CloudWatch Dashboard
+- CloudWatch alarms
+- Browser or `curl` validation
+
+---
+
+# 🚨 Primary Failure Scenario 3 — Manager Node Failure
+
+## Purpose
+
+Validate Docker Swarm manager quorum and continued cluster availability.
+
+## Failure Command
+
+On a non-leader manager:
+
+```bash
+sudo systemctl stop docker
+```
+
+## Expected Result
+
+- Selected manager becomes unavailable.
+- Remaining two managers maintain quorum.
+- Cluster management continues.
+- Application services remain available.
+
+## Recovery Command
+
+```bash
+sudo systemctl start docker
+```
+
+Validate:
+
+```bash
+sudo systemctl status docker --no-pager
+```
+
+From the active manager:
+
+```bash
+sudo docker node ls
+sudo docker service ls
+```
+
+## Evidence
+
+- `docker node ls`
+- `docker service ls`
+- CloudWatch Dashboard
+- CloudWatch alarms
+- Browser or `curl` validation
+
+---
+
+# 🔧 Operational Test 1 — Drain a Worker Node
+
+## Purpose
+
+Simulate planned maintenance without abruptly failing the server.
+
+## Maintenance Command
+
+From a manager:
+
+```bash
+sudo docker node update --availability drain <WORKER-NODE>
+```
+
+## Expected Result
+
+- Worker enters `Drain`.
+- New workloads are not scheduled to the worker.
+- Existing workloads are redistributed when possible.
+- Application remains available.
+
+## Recovery Command
+
+After maintenance:
+
+```bash
+sudo docker node update --availability active <WORKER-NODE>
+```
+
+Validate:
+
+```bash
+sudo docker node ls
+sudo docker service ps <SERVICE-NAME>
+```
+
+## Evidence
+
+- `docker node ls`
+- `docker service ps`
+- CloudWatch Dashboard
+- Browser or `curl` validation
+
+---
+
+# 🔧 Operational Test 2 — Reboot a Worker Node
+
+**The EC2 reboot temporarily stops the Docker event monitor and CloudWatch Agent until the instance returns.**
+
+## Purpose
+
+Validate recovery after planned operating system or infrastructure maintenance.
+
+## Failure / Maintenance Command
+
+On the worker:
+
+```bash
+sudo reboot
+```
+
+## Expected Result
+
+- Worker temporarily leaves or becomes unavailable.
+- Remaining infrastructure continues serving the application.
+- Worker boots again.
+- Docker, CloudWatch Agent, and supporting services recover.
+- Worker rejoins the Swarm.
+
+## Recovery Validation
+
+After reconnecting:
+
+```bash
+sudo systemctl status docker --no-pager
+sudo systemctl status amazon-cloudwatch-agent --no-pager
+sudo systemctl status docker-event-monitor --no-pager
+```
+
+From a manager:
+
+```bash
+sudo docker node ls
+sudo docker service ls
+```
+
+## Evidence
+
+- `docker node ls`
+- Service status
+- CloudWatch Dashboard
+- Browser or `curl` validation
+
+---
+
+# 🔧 Operational Test 3 — Restart Docker Service on a Worker
+
+## Purpose
+
+Simulate Docker Engine maintenance, configuration changes, or troubleshooting.
+
+## Failure Command
+
+```bash
+sudo systemctl stop docker
+```
+
+Or:
+
+```bash
+sudo systemctl restart docker
+```
+
+## Expected Result
+
+- Worker temporarily becomes unavailable.
+- Docker workloads on the worker are interrupted.
+- Swarm reacts to the unavailable node.
+- Node reconnects when Docker starts again.
+
+## Recovery Command
+
+If Docker was stopped:
+
+```bash
+sudo systemctl start docker
+```
+
+Validate:
+
+```bash
+sudo systemctl status docker --no-pager
+```
+
+From a manager:
+
+```bash
+sudo docker node ls
+sudo docker service ls
+```
+
+---
+
+# 🔧 Operational Test 4 — Restart Docker on a Drained Manager
+
+## Purpose
+
+Simulate Docker Engine maintenance on a manager while ensuring application workloads are not running on the control plane.
+
+The managers are intentionally configured as:
+
+```text
+Availability: Drain
+```
+
+## Maintenance Command
+
+On a non-leader manager:
+
+```bash
+sudo systemctl restart docker
+```
+
+## Expected Result
+
+- Selected manager temporarily disconnects.
+- Remaining managers maintain quorum.
+- Application workloads remain unaffected because managers are drained.
+- Manager returns to `Ready` after Docker restarts.
+
+## Recovery Validation
+
+On the manager:
+
+```bash
+sudo systemctl status docker --no-pager
+```
+
+From the leader:
+
+```bash
+sudo docker node ls
+sudo docker service ls
+```
+
+Confirm the manager remains:
+
+```text
+Ready
+Drain
+```
+
+---
+
+# ⚖️ Application Load Balancer Test — Unhealthy Target
+
+## Purpose
+
+Validate ALB health checks and CloudWatch monitoring when an application target becomes unhealthy.
+
+## Failure Action
+
+On the worker hosting a selected application service, stop Docker or otherwise stop the service's container.
+
+For example:
+
+```bash
+sudo docker stop <CONTAINER_ID>
+```
+
+## Expected Result
+
+- Target may become unhealthy.
+- `UnHealthyHostCount` increases.
+- CloudWatch alarm can enter `ALARM`.
+- ALB continues routing traffic to healthy targets.
+- Docker Swarm may replace the failed task.
+
+## Recovery
+
+Allow Docker Swarm to recover the task automatically, or restore the service if it was intentionally stopped.
+
+Validate:
+
+```bash
+sudo docker service ps <SERVICE-NAME>
+```
+
+Confirm target health returns to healthy.
+
+## Evidence
+
+- Target group health
+- CloudWatch Dashboard
+- ALB alarm
+- Browser or `curl` validation
+
+---
+
+# 📈 Auto Scaling Group Test — Worker Replacement
+
+## Purpose
+
+Validate that the infrastructure can restore worker capacity when a worker instance is lost or terminated.
+
+## Failure Action
+
+Perform this test carefully against a worker managed by the appropriate Auto Scaling configuration.
+
+The worker can be terminated from the AWS console or using the AWS CLI according to the project's Auto Scaling configuration.
+
+## Expected Result
+
+- Worker EC2 instance is removed.
+- Auto Scaling launches replacement capacity.
+- Replacement worker bootstraps.
+- Replacement worker installs required services.
+- Replacement worker retrieves configuration from Parameter Store.
+- CloudWatch Agent starts.
+- Docker event monitoring starts.
+- Worker joins the Docker Swarm.
+- Required labels are restored.
+- Application workload capacity returns.
+
+## Recovery Validation
+
+From a manager:
+
+```bash
+sudo docker node ls
+```
+
+Confirm the replacement node becomes:
+
+```text
+Ready
+Active
+```
+
+Check labels:
+
+```bash
+sudo docker node inspect <NEW-WORKER> \
+  --format '{{json .Spec.Labels}}'
+```
+
+Validate:
+
+```bash
+sudo docker service ls
+sudo docker service ps <SERVICE-NAME>
+```
+
+## Evidence
+
+- EC2 instance replacement
+- Auto Scaling activity
+- `docker node ls`
+- Worker labels
+- CloudWatch Agent status
+- Docker event monitor status
+- CloudWatch Dashboard
+- Browser or `curl` validation
+
+---
+
+# 🔁 General Recovery Validation
+
+After every test, return the environment to a healthy baseline.
+
+Run:
+
+```bash
+sudo docker node ls
+```
+
+```bash
+sudo docker service ls
+```
+
+```bash
+curl -I http://<ALB-DNS-NAME>
+```
+
+Confirm:
+
+- Managers are `Ready`.
+- Workers are `Ready`.
+- Managers remain `Drain`.
+- Workers are `Active`.
+- All expected services show desired replicas.
+- ALB targets are healthy.
+- Application returns HTTP 200.
+- CloudWatch alarms return to `OK`.
+
+---
+
+# 📸 Evidence Collection
+
+Recommended screenshots and evidence include:
+
+## Architecture
+
+- AWS VPC and subnet layout
+- EC2 instances
+- Application Load Balancer
+- Target group health
+- CloudWatch Dashboard
+
+## Baseline
+
+- `docker node ls`
+- `docker service ls`
+- Service placement
+- Healthy ALB targets
+- HTTP 200 response
+
+## Failure Testing
+
+For each failure:
+
+1. Baseline state
+2. Failure command
+3. Failure detection
+4. CloudWatch Dashboard
+5. CloudWatch alarm
+6. Docker Swarm response
+7. Recovery state
+8. Application validation
+
+## Operational Testing
+
+Capture:
+
+- Node state before maintenance
+- Maintenance command
+- Node or service transition
+- Application availability
+- Recovery validation
+
+---
+
+# 🚀 Deployment
+
+## Clone the Repository
+
+```bash
+git clone <YOUR-REPOSITORY-URL>
+cd aws-multi-az-docker-swarm-platform
+```
+
+## Initialize Terraform
+
+```bash
+terraform init
+```
+
+## Review the Plan
 
 ```bash
 terraform plan
 ```
 
-Deploy:
+## Deploy
 
 ```bash
 terraform apply
 ```
 
-## Key Lessons Demonstrated
+Enter:
 
-This project demonstrates several practical DevOps and cloud engineering concepts:
+```text
+yes
+```
 
-- Infrastructure as Code with Terraform
-- Multi-AZ architecture
-- Docker Swarm quorum and control-plane design
-- Application workload isolation
-- Service placement constraints
-- Automated instance bootstrapping
-- AWS Systems Manager Parameter Store
-- CloudWatch Agent configuration
-- Custom metrics and log collection
-- Metric filters and alarms
-- SNS-based alerting
-- Application Load Balancer health monitoring
-- Failure detection and recovery validation
+---
 
-## Final Validation State
+# 🧹 Destroying and Rebuilding the Environment
 
-A successful baseline should demonstrate:
+For additional practice or a completely fresh environment, Terraform can be used to destroy and recreate the infrastructure.
 
-- 3 Docker Swarm managers available
-- 3 Docker Swarm workers available
-- manager quorum intact
-- application services running across all three AZs
-- ALB targets healthy
-- HTTP `200 OK`
-- CloudWatch Agent active
-- Docker event monitor active
-- Docker events appearing in CloudWatch Logs
-- custom metrics appearing in the `EngineeringForFailure` namespace
-- failure alarms in `OK`
-- SNS subscription confirmed
+Destroy:
 
-## Author
+```bash
+terraform destroy
+```
+
+Rebuild:
+
+```bash
+terraform apply
+```
+
+> **Important:** A rebuild can create new EC2 instances, new private IP addresses, new Docker Swarm node identities, and new resources depending on the Terraform configuration. Previous screenshots and runtime state should not be expected to remain valid after destruction.
+
+After rebuilding, repeat:
+
+1. Baseline validation
+2. CloudWatch validation
+3. ALB validation
+4. SNS alarm validation
+5. Failure testing
+6. Operational testing
+
+---
+
+# 🔐 Security and Operational Design
+
+The project uses IAM roles and instance profiles to provide AWS permissions without embedding AWS credentials in bootstrap scripts.
+
+AWS Systems Manager Parameter Store is used to retrieve runtime configuration required for cluster initialization and monitoring.
+
+The manager and worker roles are separated to support the distinction between:
+
+- Control-plane responsibilities
+- Worker runtime responsibilities
+- CloudWatch telemetry
+- SSM Parameter Store access
+
+---
+
+# 💡 Key Lessons Demonstrated
+
+This project demonstrates several real-world cloud and DevOps concepts:
+
+### Infrastructure as Code
+
+Terraform provides repeatable infrastructure deployment.
+
+### High Availability
+
+Worker nodes are distributed across multiple Availability Zones.
+
+### Control Plane Resilience
+
+Three managers provide quorum protection against a single manager failure.
+
+### Container Orchestration
+
+Docker Swarm automatically manages service replicas and container recovery.
+
+### Observability
+
+CloudWatch provides infrastructure metrics, logs, dashboards, metric filters, and alarms.
+
+### Event-Driven Monitoring
+
+Docker lifecycle events are captured and converted into CloudWatch metrics.
+
+### Automated Alerting
+
+CloudWatch alarms trigger Amazon SNS notifications.
+
+### Operational Resilience
+
+The environment is tested against both unexpected failures and planned maintenance activities.
+
+### Recovery Engineering
+
+Each scenario includes validation steps to confirm that the platform returns to a healthy baseline.
+
+---
+
+# 🛣️ Future Enhancements
+
+Possible future improvements include:
+
+- Add automated failure-testing scripts.
+- Add CloudWatch Synthetics for external application checks.
+- Add AWS Systems Manager Run Command automation for controlled tests.
+- Add Prometheus and Grafana dashboards.
+- Add automated Terraform validation through GitHub Actions.
+- Add container image vulnerability scanning.
+- Add rolling service update testing.
+- Add multi-region disaster recovery.
+- Add automated chaos-engineering scenarios.
+- Add AWS Backup and recovery testing.
+- Add CI/CD deployment pipelines for application updates.
+
+---
+
+# 👤 Author
 
 **Kevin Harding**
 
 Cloud / DevOps Engineer
 
+This project was built as a hands-on portfolio demonstration of:
+
+- AWS infrastructure
+- Terraform
+- Docker Swarm
+- High availability
+- Failure testing
+- CloudWatch monitoring
+- Infrastructure resilience
+- Operational recovery
+
 ---
 
-## License
+# ⭐ Final Project Outcome
 
-This project is intended as a hands-on cloud engineering and DevOps portfolio project. Add a license appropriate for your intended use, such as the MIT License.
+The final Version 2 platform demonstrates more than successful infrastructure deployment.
+
+It demonstrates the ability to:
+
+```text
+Build → Monitor → Fail → Detect → Alert → Recover → Validate
+```
+
+The objective is to treat failure as an expected part of operating distributed infrastructure and to validate that the platform can respond predictably when failures and maintenance events occur.
