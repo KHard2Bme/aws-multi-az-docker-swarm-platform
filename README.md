@@ -157,31 +157,19 @@ The primary goals of Version 2 are to:
 ```text
 aws-multi-az-docker-swarm-platform/
 │
-├── main.tf
-├── iam.tf
+├── scripts/
+│   ├── manager_bootstrap.sh
+│   ├── worker-bootstrap.sh
+│   └── docker_event_monitor.sh
+│
 ├── cloudwatch.tf
-├── variables.tf
+├── iam.tf
+├── main.tf
 ├── outputs.tf
-├── terraform.tfvars
-│
-├── manager-bootstrap.sh
-├── worker-bootstrap.sh
-│
+├── variables.tf
+├── providers.tf
 ├── docker-stack.yml
-│
-├── cloudwatch-agent-config.json
-│
-├── README.md
-│
-└── screenshots/
-    ├── architecture/
-    ├── baseline/
-    ├── container-failure/
-    ├── worker-failure/
-    ├── manager-failure/
-    ├── operational-maintenance/
-    ├── alb-testing/
-    └── asg-testing/
+└── README.md
 ```
 
 ---
