@@ -7,7 +7,7 @@
 ![Amazon Linux](https://img.shields.io/badge/OS-Amazon%20Linux%202023-green)
 ![Status](https://img.shields.io/badge/Project-Version%202-success)
 
-Testing Failure, Recovery, and Resilience with Terraform, Docker Swarm, CloudWatch, Auto Scaling, and Amazon SNS
+## Testing Failure, Recovery, and Resilience with Terraform, Docker Swarm, CloudWatch, Auto Scaling, and Amazon SNS
 
 A hands-on AWS and Docker Swarm resilience project designed to demonstrate how a distributed application platform responds to **container failures, worker failures, manager failures, planned maintenance events, load balancer failures, and Auto Scaling recovery scenarios**.
 
