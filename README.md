@@ -1,4 +1,4 @@
-# AWS Multi-AZ Docker Swarm Platform — Engineering for Failure
+# Engineering for Failure: Building a Resilient, Self-Healing Container Platform on AWS
 
 ![AWS](https://img.shields.io/badge/AWS-Cloud-orange)
 ![Terraform](https://img.shields.io/badge/IaC-Terraform-purple)
@@ -6,6 +6,8 @@
 ![CloudWatch](https://img.shields.io/badge/Monitoring-CloudWatch-ff9900)
 ![Amazon Linux](https://img.shields.io/badge/OS-Amazon%20Linux%202023-green)
 ![Status](https://img.shields.io/badge/Project-Version%202-success)
+
+## Testing Failure, Recovery, and Resilience with Terraform, Docker Swarm, CloudWatch, Auto Scaling, and Amazon SNS
 
 A hands-on AWS and Docker Swarm resilience project designed to demonstrate how a distributed application platform responds to **container failures, worker failures, manager failures, planned maintenance events, load balancer failures, and Auto Scaling recovery scenarios**.
 
