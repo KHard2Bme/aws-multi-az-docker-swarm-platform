@@ -17,7 +17,8 @@ services:
           - node.labels.az == us-east-1a
 
       restart_policy:
-        condition: on-failure
+        condition: any
+        delay: 5s
 
 
   apache-b:
@@ -32,7 +33,8 @@ services:
           - node.labels.az == us-east-1b
 
       restart_policy:
-        condition: on-failure
+        condition: any
+        delay: 5s
 
 
   apache-c:
@@ -47,4 +49,5 @@ services:
           - node.labels.az == us-east-1c
 
       restart_policy:
-        condition: on-failure
+        condition: any
+        delay: 5s
