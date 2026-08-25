@@ -309,10 +309,10 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
 
         properties = {
           title  = "Manager Status Checks"
-          view   = "timeSeries"
+          view   = "singleValue"
           region = var.aws_region
           stat   = "Maximum"
-          period = 300
+          period = 60
 
           metrics = [
             for i in aws_instance.managers :
@@ -372,7 +372,7 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
 
         properties = {
           title  = "Container Failures"
-          view   = "timeSeries"
+          view   = "singleValue"
           region = var.aws_region
           stat   = "Sum"
           period = 60
@@ -399,7 +399,7 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
 
         properties = {
           title  = "Worker Node Failures"
-          view   = "timeSeries"
+          view   = "singleValue"
           region = var.aws_region
           stat   = "Sum"
           period = 60
@@ -426,7 +426,7 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
 
         properties = {
           title  = "Manager Node Failures"
-          view   = "timeSeries"
+          view   = "singleValue"
           region = var.aws_region
           stat   = "Sum"
           period = 60
@@ -453,7 +453,7 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
 
         properties = {
           title  = "ALB Healthy Hosts"
-          view   = "timeSeries"
+          view   = "singleValue"
           region = var.aws_region
           stat   = "Average"
           period = 60
@@ -484,7 +484,7 @@ resource "aws_cloudwatch_dashboard" "dashboard" {
 
         properties = {
           title  = "ALB Unhealthy Hosts"
-          view   = "timeSeries"
+          view   = "singleValue"
           region = var.aws_region
           stat   = "Average"
           period = 60
