@@ -12,6 +12,9 @@ CLOUDWATCH_CONFIG_FILE="/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-a
 DOCKER_EVENT_MONITOR="/usr/local/bin/docker_event_monitor.sh"
 DOCKER_EVENT_SERVICE="/etc/systemd/system/docker-event-monitor.service"
 
+DOCKER_SERVICE_MONITOR="/usr/local/bin/docker_service_monitor.sh"
+DOCKER_SERVICE_SERVICE="/etc/systemd/system/docker-service-monitor.service"
+
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
 }
@@ -278,6 +281,72 @@ systemctl is-active --quiet docker-event-monitor.service || \
 log "Docker event monitoring service is running."
 
 #############################################
+# Create Docker Service Failure Monitor Script
+#############################################
+
+log "Creating Docker service failure monitoring script..."
+
+cat > "$DOCKER_SERVICE_MONITOR" <<'EOF'
+#!/bin/bash
+set -u
+NODE_ROLE="$1"
+LOG_FILE="/var/log/docker-events.log"
+
+if [ "$NODE_ROLE" = "worker" ]; then
+  FAILURE_EVENT="WorkerNodeFailure"
+else
+  FAILURE_EVENT="ManagerNodeFailure"
+fi
+
+touch "$LOG_FILE"
+chmod 644 "$LOG_FILE"
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] DockerServiceMonitorStarted role=${NODE_ROLE}" >> "$LOG_FILE"
+
+FAILURE_REPORTED=false
+while true; do
+  if ! systemctl is-active --quiet docker; then
+    if [ "$FAILURE_REPORTED" = false ]; then
+      echo "[$(date '+%Y-%m-%d %H:%M:%S')] ${FAILURE_EVENT} docker_service=inactive role=${NODE_ROLE} hostname=$(hostname)" >> "$LOG_FILE"
+      FAILURE_REPORTED=true
+    fi
+  else
+    if [ "$FAILURE_REPORTED" = true ]; then
+      echo "[$(date '+%Y-%m-%d %H:%M:%S')] DockerServiceRecovered role=${NODE_ROLE} hostname=$(hostname)" >> "$LOG_FILE"
+      FAILURE_REPORTED=false
+    fi
+  fi
+  sleep 5
+done
+EOF
+
+chmod 755 "$DOCKER_SERVICE_MONITOR"
+
+cat > "$DOCKER_SERVICE_SERVICE" <<EOF
+[Unit]
+Description=Docker Service Failure Monitor
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=$DOCKER_SERVICE_MONITOR worker
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable docker-service-monitor.service
+systemctl restart docker-service-monitor.service || \
+  fail "Unable to start Docker service failure monitoring service."
+
+systemctl is-active --quiet docker-service-monitor.service || \
+  fail "Docker service failure monitoring service is not active."
+
+log "Docker service failure monitoring service is running."
+
+#############################################
 # Start CloudWatch Agent
 #############################################
 
@@ -399,6 +468,7 @@ CONTROL_AVAILABLE=$(docker info \
 
 log "Verified: node is an active Swarm worker."
 log "CloudWatch monitoring is active."
+log "Docker event and Docker service failure monitoring are active."
 log "Worker remains available for application workloads."
 log "Worker node labeling will be performed from the Swarm manager."
 log "Docker Swarm Worker Bootstrap Complete."
