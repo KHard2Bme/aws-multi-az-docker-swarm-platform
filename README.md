@@ -161,7 +161,7 @@ aws-multi-az-docker-swarm-platform/
 │
 ├── scripts/
 │   ├── manager_bootstrap.sh
-│   ├── worker-bootstrap.sh
+│   ├── worker_bootstrap.sh
 │   └── docker_event_monitor.sh
 │
 ├── cloudwatch.tf
@@ -222,6 +222,8 @@ apache-c → Worker C / us-east-1c
 
 This makes failure testing easier to observe and provides predictable workload placement.
 
+> **ASG replacement note:** A replacement worker receives a new EC2 instance identity and Docker Swarm node identity. In the current Version 2 implementation, the replacement worker automatically bootstraps and rejoins the Swarm, but the required `workload=application` and `az=<Availability-Zone>` labels are applied manually from `manager-1` before the placement-constrained application service can be scheduled.
+
 ---
 
 # 📊 CloudWatch Monitoring
@@ -275,6 +277,20 @@ The CloudWatch Agent forwards the events to:
 ```
 
 This provides a centralized record of container and Docker-related events.
+
+### Monitoring Services
+
+The project uses separate monitoring components for different responsibilities:
+
+- **CloudWatch Agent** — collects CPU, memory, and network metrics and forwards Docker event logs.
+- **Docker Event Monitor** — captures selected Docker lifecycle events and writes them to `/var/log/docker-events.log`.
+- **Docker Service Failure Monitor** — runs as a systemd service on the nodes to detect Docker service/node failure conditions and write corresponding events to the Docker event log.
+- **CloudWatch Metric Filters** — convert relevant event-log entries into failure metrics.
+- **CloudWatch Dashboard** — provides visual evidence of infrastructure and failure conditions.
+- **CloudWatch Alarms** — evaluate failure metrics and ALB health metrics.
+- **Amazon SNS** — sends email notifications when configured alarms enter `ALARM`.
+
+The Docker event monitor and Docker service failure monitor are intended to run as systemd services on the project nodes.
 
 ---
 
@@ -334,6 +350,22 @@ The Version 2 dashboard focuses on the signals most useful during failure testin
 - ALB Unhealthy Hosts
 
 These eight widgets provide a focused view of the platform's health during resilience testing.
+
+### Failure-Test Dashboard Evidence
+
+| Test condition | CloudWatch Dashboard evidence |
+|---|---|
+| Container Failure | **Container Failures = 1** during the detected failure |
+| Worker Node Failure | **Worker Node Failures = 1** and **ALB Unhealthy Hosts = 1** while the affected worker/target is unhealthy |
+| Manager Node Failure | **Manager Node Failures = 1** during the detected manager failure |
+| Drain a Worker | Failure widgets should remain **0** when planned maintenance does not cause a detected failure |
+| Reboot a Worker | Failure widgets should normally remain **0** after normal planned recovery; document any transient failure metric observed |
+| Restart Docker on a Worker | Failure widgets should normally remain **0** if the runtime restart recovers normally; document any transient detected failure |
+| Restart Docker on a Drained Manager | **Manager Node Failures should remain 0** when quorum is maintained |
+| ALB / Target Failure | **ALB Unhealthy Hosts = 1** while the affected target is unhealthy |
+| ASG Worker Replacement | **ALB Unhealthy Hosts = 1** while the affected target is unavailable; other failure widgets reflect only failures actually detected |
+
+> **Evidence note:** Dashboard values are failure-event/metric evidence. Capture the widget during the failure window and record the corresponding CloudWatch alarm state, Docker event, node/service state, and recovery state.
 
 ---
 
@@ -415,6 +447,24 @@ The following tests are divided into:
 
 For each scenario, capture evidence before, during, and after recovery.
 
+## Test Scenario Coverage
+
+The nine scenarios intentionally exercise different failure and operational layers:
+
+| Scenario | Primary concept demonstrated |
+|---|---|
+| Container Failure | Container-level self-healing and service replacement |
+| Worker Node Failure | Worker/node failure detection, workload recovery, monitoring, and ALB impact |
+| Manager Node Failure | Docker Swarm control-plane resilience and quorum |
+| Drain a Worker Node | Planned maintenance and graceful workload management |
+| Reboot a Worker Node | Host/operating-system restart recovery |
+| Restart Docker on a Worker | Docker Engine/runtime restart recovery |
+| Restart Docker on a Drained Manager | Control-plane maintenance while managers remain excluded from application workloads |
+| ALB / Target Failure | Application Load Balancer health checks and unhealthy-target monitoring |
+| ASG Worker Replacement | Infrastructure self-healing, bootstrap, Swarm rejoin, workload restoration, and ALB recovery |
+
+The tests overlap intentionally where one failure can produce evidence at multiple layers. The objective is to validate the complete resilience chain rather than repeat identical tests.
+
 ---
 
 # 🚨 Primary Failure Scenario 1 — Container Failure
@@ -466,6 +516,7 @@ sudo docker ps
 - CloudWatch Dashboard
 - CloudWatch Alarm
 - Browser or `curl` validation
+- **CloudWatch Dashboard: Container Failures should show 1 during the detected container failure.**
 
 ---
 
@@ -523,6 +574,7 @@ sudo docker service ps engineering-for-failure_apache-c
 - CloudWatch Dashboard
 - CloudWatch alarms
 - Browser or `curl` validation
+- **CloudWatch Dashboard: Worker Node Failures should show 1 and ALB Unhealthy Hosts should show 1 while the affected worker/target is unhealthy.**
 
 ---
 
@@ -573,6 +625,7 @@ sudo docker service ls
 - CloudWatch Dashboard
 - CloudWatch alarms
 - Browser or `curl` validation
+- **CloudWatch Dashboard: Manager Node Failures should show 1 during the detected manager failure.**
 
 ---
 
@@ -618,6 +671,7 @@ sudo docker service ps <SERVICE-NAME>
 - `docker service ps`
 - CloudWatch Dashboard
 - Browser or `curl` validation
+- **CloudWatch Dashboard: Failure widgets should remain 0 if the planned drain does not cause a detected failure.**
 
 ---
 
@@ -668,6 +722,7 @@ sudo docker service ls
 - Service status
 - CloudWatch Dashboard
 - Browser or `curl` validation
+- **CloudWatch Dashboard: Failure widgets should normally remain 0 for a planned worker reboot when recovery is normal; document any transient failure metric observed.**
 
 ---
 
@@ -812,6 +867,7 @@ Confirm target health returns to healthy.
 - CloudWatch Dashboard
 - ALB alarm
 - Browser or `curl` validation
+- **CloudWatch Dashboard: ALB Unhealthy Hosts should show 1 while the affected target is unhealthy.**
 
 ---
 
@@ -837,7 +893,10 @@ The worker can be terminated from the AWS console or using the AWS CLI according
 - CloudWatch Agent starts.
 - Docker event monitoring starts.
 - Worker joins the Docker Swarm.
-- Required labels are restored.
+- Required application placement labels are applied from `manager-1`:
+  - `workload=application`
+  - `az=<replacement worker Availability Zone>`
+- Swarm schedules the application workload after the labels satisfy the service placement constraints.
 - Application workload capacity returns.
 
 ## Recovery Validation
@@ -862,6 +921,22 @@ sudo docker node inspect <NEW-WORKER> \
   --format '{{json .Spec.Labels}}'
 ```
 
+If the replacement worker does not yet have the required labels, apply them from `manager-1`:
+
+```bash
+sudo docker node update \
+  --label-add workload=application \
+  --label-add az=<REPLACEMENT-WORKER-AZ> \
+  <NEW-WORKER>
+```
+
+Then verify:
+
+```bash
+sudo docker node inspect <NEW-WORKER> \
+  --format '{{json .Spec.Labels}}'
+```
+
 Validate:
 
 ```bash
@@ -879,6 +954,7 @@ sudo docker service ps <SERVICE-NAME>
 - Docker event monitor status
 - CloudWatch Dashboard
 - Browser or `curl` validation
+- **CloudWatch Dashboard: ALB Unhealthy Hosts should show 1 while the terminated worker target is unavailable; other failure widgets should reflect only failures actually detected during the replacement test.**
 
 ---
 
@@ -929,7 +1005,7 @@ Recommended screenshots and evidence include:
 
 - `docker node ls`
 - `docker service ls`
-- Service placement
+- Service placement and required worker labels
 - Healthy ALB targets
 - HTTP 200 response
 
@@ -1020,6 +1096,8 @@ After rebuilding, repeat:
 5. Failure testing
 6. Operational testing
 
+After a fresh rebuild, also verify the bootstrap-installed monitoring services and application placement labels before beginning failure testing. For an ASG worker replacement, the replacement receives a new Swarm node identity; in the current implementation, apply the required application placement labels from `manager-1` before expecting an AZ-constrained application service to schedule on the replacement.
+
 ---
 
 # 🔐 Security and Operational Design
@@ -1077,23 +1155,11 @@ The environment is tested against both unexpected failures and planned maintenan
 
 Each scenario includes validation steps to confirm that the platform returns to a healthy baseline.
 
----
+### Troubleshooting and Failure Analysis
 
-# 🛣️ Future Enhancements
+The ASG replacement test demonstrated an important operational lesson: successfully launching and joining a replacement EC2 worker to Docker Swarm does not by itself guarantee that an application service can be scheduled. Because the services use AZ-aware placement constraints, the replacement worker must have the required `workload` and `az` labels before Swarm can place the workload. Applying those labels from `manager-1` allowed the service to recover and the ALB targets to return to `Healthy`.
 
-Possible future improvements include:
-
-- Add automated failure-testing scripts.
-- Add CloudWatch Synthetics for external application checks.
-- Add AWS Systems Manager Run Command automation for controlled tests.
-- Add Prometheus and Grafana dashboards.
-- Add automated Terraform validation through GitHub Actions.
-- Add container image vulnerability scanning.
-- Add rolling service update testing.
-- Add multi-region disaster recovery.
-- Add automated chaos-engineering scenarios.
-- Add AWS Backup and recovery testing.
-- Add CI/CD deployment pipelines for application updates.
+This demonstrates not only automated infrastructure replacement, but also the importance of validating orchestration placement constraints during recovery.
 
 ---
 
