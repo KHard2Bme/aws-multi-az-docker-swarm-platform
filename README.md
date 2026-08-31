@@ -353,19 +353,19 @@ These eight widgets provide a focused view of the platform's health during resil
 
 ### Failure-Test Dashboard Evidence
 
-| Test condition | CloudWatch Dashboard evidence |
-|---|---|
-| Container Failure | **Container Failures = 1** during the detected failure |
-| Worker Node Failure | **Worker Node Failures = 1** and **ALB Unhealthy Hosts = 1** while the affected worker/target is unhealthy |
-| Manager Node Failure | **Manager Node Failures = 1** during the detected manager failure |
-| Drain a Worker | Failure widgets should remain **0** when planned maintenance does not cause a detected failure |
-| Reboot a Worker | Failure widgets should normally remain **0** after normal planned recovery; document any transient failure metric observed |
-| Restart Docker on a Worker | Failure widgets should normally remain **0** if the runtime restart recovers normally; document any transient detected failure |
-| Restart Docker on a Drained Manager | **Manager Node Failures should remain 0** when quorum is maintained |
-| ALB / Target Failure | **ALB Unhealthy Hosts = 1** while the affected target is unhealthy |
-| ASG Worker Replacement | **ALB Unhealthy Hosts = 1** while the affected target is unavailable; other failure widgets reflect only failures actually detected |
+| Test condition | Expected behavior | Observed CloudWatch Dashboard evidence | Explanation |
+|---|---|---|---|
+| Container Failure | Container failure should be detected and Swarm should replace the failed task. | **Container Failures = 2** during the detected failure. | Two relevant container lifecycle failure events were captured by the monitoring pipeline. |
+| Worker Node Failure | Worker failure should be detected; the affected ALB target may become unhealthy while workload recovery occurs. | **Worker Node Failures = 1** and **ALB Unhealthy Hosts = 1**. | Matches the expected worker failure and ALB impact. |
+| Manager Node Failure | Manager failure should be detected while the remaining managers maintain quorum. | **Manager Node Failures = 1** during the detected manager failure. | Matches the expected manager failure detection. |
+| Drain a Worker | Planned drain should not represent an infrastructure failure, but moving a workload can generate container lifecycle events. | **Container Failures = 2** during the detected maintenance event. | These were container lifecycle events associated with workload movement; they do not mean two worker nodes failed. |
+| Reboot a Worker | A planned reboot may cause a brief node interruption; detection depends on the monitoring interval and interruption duration. | **Worker Node Failures = 1**. | The reboot interruption was long enough to satisfy the project's worker-node failure detection logic. |
+| Restart Docker on a Worker | A brief Docker runtime restart should recover without a failure alarm if it completes before the monitoring threshold. | **No failure widgets triggered.** | The Docker restart recovered before a qualifying sustained failure was detected. A running container alone does not create a ContainerFailure metric. |
+| Restart Docker on a Drained Manager | A planned Docker restart should preserve quorum while managers remain excluded from application workloads. | **Manager Node Failure = 1**. | The manager Docker-service interruption was detected even though quorum remained intact. |
+| ALB / Target Failure | The affected target should fail its ALB health check and `UnHealthyHostCount` should increase. | **ALB Unhealthy Hosts = 3** during the recovery window. | This counts unhealthy registered targets, not EC2 instances intentionally shut down. Original worker-a was **Draining**, while worker-b, worker-c, and the replacement worker-a were **Unhealthy** at that measurement point. |
+| ASG Worker Replacement | ASG should launch replacement capacity; the worker should join Swarm, receive required labels, host the workload, and restore ALB health. | **ALB Unhealthy Hosts = 1** while the affected target was unavailable. | Matches the expected temporary impact during replacement. The replacement initially required the application placement labels before the constrained workload could be scheduled. |
 
-> **Evidence note:** Dashboard values are failure-event/metric evidence. Capture the widget during the failure window and record the corresponding CloudWatch alarm state, Docker event, node/service state, and recovery state.
+> **Evidence note:** The **Expected behavior** column describes what the test is intended to demonstrate; the **Observed CloudWatch Dashboard evidence** column records what actually occurred during Version 2 testing. Differences are documented rather than changed to match a predetermined value. Dashboard values can be transient, so correlate them with the Docker event log, node/service state, ALB target health, CloudWatch alarm state, SNS notification, and recovery state.
 
 ---
 
@@ -516,7 +516,7 @@ sudo docker ps
 - CloudWatch Dashboard
 - CloudWatch Alarm
 - Browser or `curl` validation
-- **CloudWatch Dashboard: Container Failures should show 1 during the detected container failure.**
+- **CloudWatch Dashboard: Observed result was Container Failures = 2 during the detected failure.**
 
 ---
 
@@ -671,7 +671,7 @@ sudo docker service ps <SERVICE-NAME>
 - `docker service ps`
 - CloudWatch Dashboard
 - Browser or `curl` validation
-- **CloudWatch Dashboard: Failure widgets should remain 0 if the planned drain does not cause a detected failure.**
+- **CloudWatch Dashboard: Observed result was Container Failures = 2 during the drain; these represent container lifecycle events associated with workload movement, not two node failures.**
 
 ---
 
@@ -722,7 +722,7 @@ sudo docker service ls
 - Service status
 - CloudWatch Dashboard
 - Browser or `curl` validation
-- **CloudWatch Dashboard: Failure widgets should normally remain 0 for a planned worker reboot when recovery is normal; document any transient failure metric observed.**
+- **CloudWatch Dashboard: Observed result was Worker Node Failures = 1; the reboot interruption was long enough to be detected by the worker-node monitoring logic.**
 
 ---
 
@@ -867,7 +867,7 @@ Confirm target health returns to healthy.
 - CloudWatch Dashboard
 - ALB alarm
 - Browser or `curl` validation
-- **CloudWatch Dashboard: ALB Unhealthy Hosts should show 1 while the affected target is unhealthy.**
+- **CloudWatch Dashboard: Observed result was ALB Unhealthy Hosts = 3 during the recovery window; this represented three unhealthy registered targets, not three intentionally failed EC2 instances.**
 
 ---
 
@@ -954,7 +954,7 @@ sudo docker service ps <SERVICE-NAME>
 - Docker event monitor status
 - CloudWatch Dashboard
 - Browser or `curl` validation
-- **CloudWatch Dashboard: ALB Unhealthy Hosts should show 1 while the terminated worker target is unavailable; other failure widgets should reflect only failures actually detected during the replacement test.**
+- **CloudWatch Dashboard: Observed result was ALB Unhealthy Hosts = 1 while the affected target was unavailable; the replacement later became healthy after the required Swarm labels were applied.**
 
 ---
 
